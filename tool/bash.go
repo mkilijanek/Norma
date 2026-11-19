@@ -125,6 +125,9 @@ func runBashManaged(ctx context.Context, tc *ToolContext, command string, timeou
 	if finished {
 		info, _ := tc.Tasks.Get(t.ID)
 		tc.Tasks.Forget(t.ID)
+		if info.KillReason != "" {
+			return Errorf(fmt.Sprintf("%s\n\n[%s]", Capture(tc, output), info.KillReason)), nil
+		}
 		if info.Status == TaskFailed {
 			if strings.TrimSpace(output) == "" {
 				output = "(no output)"
