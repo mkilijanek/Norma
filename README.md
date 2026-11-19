@@ -6,7 +6,9 @@ You point it at any model (via the **Anthropic** *or* **OpenAI** wire format), d
 
 **What you get out of the box:** dual-format streaming, a fail-closed tool system with the standard file/shell toolset, a four-stage permission pipeline, automatic context-window management, lifecycle hooks, subagents, MCP, plan mode, long-term memory, a skill system, background tasks, and multi-agent coordination — all behind one stateful `Session`.
 
-Module path: `github.com/Autumn-27/norma` · Go 1.23+ (uses `iter`).
+Module path: `github.com/Autumn-27/norma` · Go 1.26.3 or newer (the version in `go.mod`; the code uses `iter`).
+
+> The module path is kept as the upstream's on purpose, so changes stay easy to merge from upstream. This repository is hosted at `github.com/mkilijanek/Norma`, so `go get github.com/mkilijanek/Norma` fails with a module-path mismatch. To build against this repository from another module, require `github.com/Autumn-27/norma` and add `replace github.com/Autumn-27/norma => github.com/mkilijanek/Norma <version>`.
 
 ## Packages
 
