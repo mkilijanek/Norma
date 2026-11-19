@@ -289,6 +289,9 @@ func checkInvariants(t *testing.T, sess *Session, history []llm.Message, when st
 // The headline chaos test: a model behaving badly in every way the design
 // anticipates, over a long session, must leave the invariants intact.
 func TestChaosAgentPreservesInvariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	for _, seed := range []uint64{1, 7, 42, 1337, 90210} {
 		t.Run(fmt.Sprintf("seed%d", seed), func(t *testing.T) {
 			sess := simSession(t, 40000)
@@ -330,6 +333,9 @@ func TestChaosAgentNeverProducesAGoError(t *testing.T) {
 // A good model having an ordinary bad day — mostly right, occasionally wrong —
 // is the realistic case, and it must still be held inside the window.
 func TestMostlyCompetentModelStaysBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	window := 40000
 	for _, seed := range []uint64{3, 11, 2024} {
 		t.Run(fmt.Sprintf("seed%d", seed), func(t *testing.T) {
