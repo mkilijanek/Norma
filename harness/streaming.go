@@ -22,8 +22,8 @@ type streamExec struct {
 	// wrap-up phase while an interrupted tool may still be running.
 	toolCtx context.Context
 	mu      sync.Mutex
-	tools  []*tracked
-	notify chan struct{} // pinged when a tool completes or emits progress
+	tools   []*tracked
+	notify  chan struct{} // pinged when a tool completes or emits progress
 }
 
 type toolStatus int
