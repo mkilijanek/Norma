@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # These four are replaced by forks under github.com/mkilijanek (see the
+    # replace block in go.mod). A bump of the require line would be overridden
+    # by the replace directive and change nothing, so Dependabot ignores them.
+    # To update one: sync the fork with its upstream, then bump the replace line.
+    ignore:
+      - dependency-name: github.com/creack/pty
+      - dependency-name: github.com/hinshun/vt10x
+      - dependency-name: golang.org/x/net
+      - dependency-name: gopkg.in/yaml.v3

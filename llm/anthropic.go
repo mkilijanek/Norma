@@ -72,7 +72,7 @@ func (p *anthropicProvider) buildBody(req CompletionRequest, stream bool) ([]byt
 		System:        buildAnthropicSystem(req),
 	}
 	for _, t := range req.Tools {
-		body.Tools = append(body.Tools, anthropicTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
+		body.Tools = append(body.Tools, anthropicTool(t))
 	}
 	if thinkingType != "" {
 		body.Thinking = &anthropicThinking{Type: thinkingType}
