@@ -248,9 +248,3 @@ func (e *streamExec) extraMessages() []llm.Message {
 	}
 	return out
 }
-
-func (e *streamExec) count() int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return len(e.tools)
-}

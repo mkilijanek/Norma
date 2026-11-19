@@ -49,12 +49,6 @@ type ToolContext struct {
 	Env []string
 }
 
-func (tc *ToolContext) progress(msg string) {
-	if tc != nil && tc.Emit != nil {
-		tc.Emit(ProgressInfo{Message: msg})
-	}
-}
-
 // Result is the outcome of a tool call. Content is the tool_result payload fed
 // back to the model.
 type Result struct {

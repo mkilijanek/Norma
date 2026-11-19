@@ -22,14 +22,6 @@ type PipelineContext struct {
 	CountTokens TokenCountFn
 }
 
-// count resolves the token estimator, defaulting when unset.
-func (c PipelineContext) count(s string) int {
-	if c.CountTokens == nil {
-		return DefaultCountTokens(s)
-	}
-	return c.CountTokens(s)
-}
-
 // PipelineNode is one stage of the per-turn view projection.
 type PipelineNode interface {
 	Name() string

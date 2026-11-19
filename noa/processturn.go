@@ -66,12 +66,7 @@ func ProcessTurn(in ProcessTurnInput) ProcessTurnResult {
 		State:    in.State,
 	}
 	io = RunPipeline(pipelineNodes(), io, ctx)
-	return ProcessTurnResult{
-		Messages:       io.Messages,
-		State:          io.State,
-		Nudge:          io.Nudge,
-		TruncatedCount: io.TruncatedCount,
-	}
+	return ProcessTurnResult(io)
 }
 
 // pipelineNodes is the per-turn projection, in order.
