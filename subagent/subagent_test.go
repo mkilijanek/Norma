@@ -182,3 +182,48 @@ func TestSubagentOutputContextPropagated(t *testing.T) {
 		}
 	})
 }
+
+func namedTool(name string) tool.CoreTool {
+	return tool.Build(tool.Spec{
+		Name: name, Description: name, Schema: map[string]any{"type": "object"},
+		ReadOnly:   func(json.RawMessage) bool { return true },
+		Concurrent: func(json.RawMessage) bool { return true },
+		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
+			return permission.Allowed()
+		},
+		Run: func(context.Context, json.RawMessage, *tool.ToolContext) (tool.Result, error) {
+			return tool.Text("ok"), nil
+		},
+	})
+}
+
+func toolNames(r *tool.Registry) []string {
+	var out []string
+	for _, t := range r.List() {
+		out = append(out, t.Name())
+	}
+	return out
+}
+
+func TestFilterTools(t *testing.T) {
+	parent := tool.NewRegistry(namedTool("Read"), namedTool("Bash"), namedTool("Grep"))
+
+	if got := filterTools(nil, []string{"Read"}); len(got.List()) != 0 {
+		t.Errorf("nil parent: got %v, want an empty registry", toolNames(got))
+	}
+	if got := filterTools(parent, nil); got != parent {
+		t.Error("no names: want the parent registry itself, unchanged")
+	}
+	if got := toolNames(filterTools(parent, []string{"Grep", "Read"})); strings.Join(got, ",") != "Read,Grep" {
+		t.Errorf("subset: got %v, want [Read Grep] (parent order, not request order)", got)
+	}
+	if got := toolNames(filterTools(parent, []string{"Nope", "Bash"})); strings.Join(got, ",") != "Bash" {
+		t.Errorf("unknown names must be ignored: got %v, want [Bash]", got)
+	}
+	if got := filterTools(parent, []string{"Nope"}); len(got.List()) != 0 {
+		t.Errorf("only unknown names: got %v, want an empty registry", toolNames(got))
+	}
+	if _, ok := parent.Get("Bash"); !ok {
+		t.Error("filtering must not mutate the parent registry")
+	}
+}
