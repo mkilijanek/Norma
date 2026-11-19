@@ -249,6 +249,9 @@ func textOf(msgs []llm.Message) []string {
 // so every time ~5000 tokens of fresh compressible content accumulate it fires
 // again. At ~1k tokens a turn that is one nudge per five turns, forever.
 func TestPressureBandDoesNotRenudgeEveryFewTurns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	window := 128_000
 	sess := simSession(t, window)
 	a := newSimAgent(t, sess, 1)
@@ -288,6 +291,9 @@ func TestPressureBandDoesNotRenudgeEveryFewTurns(t *testing.T) {
 // of the request. A session whose view comfortably fits keeps its tool results
 // whole, however long the underlying history has grown.
 func TestTruncationDoesNotFireOnARequestThatFits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	window := 128_000
 	sess := simSession(t, window)
 	a := newSimAgent(t, sess, 1)

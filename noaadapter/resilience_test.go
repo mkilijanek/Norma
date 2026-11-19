@@ -299,6 +299,9 @@ func TestTier1ArchivesContainTheOriginalText(t *testing.T) {
 // If a link is broken, a summary points at a file that points nowhere, and the
 // content is unreachable even though it is still on disk.
 func TestArchiveChainReachesRawContentFromEveryTier(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	// 128K: the smallest window where consolidation actually fires, so the chain
 	// has more than one link to walk. See TestTierTwoIsUnreachableOnSmallWindows.
 	sess := simSession(t, 128_000)

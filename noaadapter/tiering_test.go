@@ -19,6 +19,9 @@ import (
 
 // The end-to-end property: a long cooperative session advances past tier 1.
 func TestLongSessionReachesTierTwo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	// 128K is the smallest shipped window where this holds; see
 	// TestTierTwoIsUnreachableOnSmallWindows for why 40K does not.
 	sess := simSession(t, 128_000)
@@ -49,6 +52,9 @@ func TestLongSessionReachesTierTwo(t *testing.T) {
 // This pins the format the nudge actually emits, so a change to it fails here
 // rather than showing up as "tiering doesn't work" much later.
 func TestTierNudgeNamesItsTargetsInAReadableFormat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	sess := simSession(t, 128_000)
 	a := newSimAgent(t, sess, 1)
 
@@ -91,6 +97,9 @@ func TestTierNudgeNamesItsTargetsInAReadableFormat(t *testing.T) {
 // produces tier-2 blocks at a 40K window, so the test asserts that it keeps
 // working, as the old failure message asked.
 func TestTierTwoWorksOnSmallWindows(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation (several seconds); skipped with -short")
+	}
 	const window = 40_000
 	sess := simSession(t, window)
 	a := newSimAgent(t, sess, 1)

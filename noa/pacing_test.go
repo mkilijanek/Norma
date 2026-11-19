@@ -8,7 +8,7 @@ import "testing"
 // behaviour downstream — cadence, suppression release, tier spacing — is derived
 // from this one number.
 
-// GrowthRatio says the growth unit is 5% of the window. The clamp band is meant
+// GrowthRatio says the growth unit is a fixed fraction of the window. The clamp band is meant
 // to keep that sane at the extremes, not to replace it.
 func TestAdaptiveGrowthTracksTheWindow(t *testing.T) {
 	small := DefaultConfig(40_000)
