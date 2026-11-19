@@ -90,6 +90,40 @@ func NewWebFetch(cfg WebFetchConfig) CoreTool {
 
 const maxFetchBytes = 2 << 20 // 2 MiB
 
+// validateFetchConfig rejects a proxy or CA-certificate setting that
+// newFetchClient could not apply. Without this check the client silently drops
+// the setting, so a request meant for a proxy goes out directly and exposes the
+// caller's real address. url.Parse almost never fails (it accepts
+// "localhost:8080" as scheme "localhost"), so the scheme and host are checked
+// explicitly. The CA file is only checked when it will actually be used
+// (InsecureTLS takes precedence over CACert in newFetchClient).
+func validateFetchConfig(cfg WebFetchConfig) error {
+	if cfg.Proxy != "" {
+		pu, err := url.Parse(cfg.Proxy)
+		if err != nil {
+			return fmt.Errorf("invalid proxy URL: %w", err)
+		}
+		switch strings.ToLower(pu.Scheme) {
+		case "http", "https", "socks5", "socks5h":
+		default:
+			return fmt.Errorf("invalid proxy URL %q: scheme must be http, https, socks5 or socks5h", cfg.Proxy)
+		}
+		if pu.Hostname() == "" {
+			return fmt.Errorf("invalid proxy URL %q: missing host", cfg.Proxy)
+		}
+	}
+	if cfg.CACert != "" && !cfg.InsecureTLS {
+		pem, err := os.ReadFile(cfg.CACert)
+		if err != nil {
+			return fmt.Errorf("cannot read CA certificate: %w", err)
+		}
+		if !x509.NewCertPool().AppendCertsFromPEM(pem) {
+			return fmt.Errorf("CA certificate %q contains no valid PEM certificate", cfg.CACert)
+		}
+	}
+	return nil
+}
+
 // newFetchClient returns an HTTP client honoring the proxy / TLS config.
 func newFetchClient(cfg WebFetchConfig) *http.Client {
 	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" {
@@ -206,6 +240,14 @@ func staticAssetExt(rawURL string) string {
 }
 
 func webFetchRunner(cfg WebFetchConfig) func(context.Context, json.RawMessage, *ToolContext) (Result, error) {
+	// Fail closed: a proxy/CA setting that cannot be applied must not degrade to a
+	// direct, unproxied request.
+	if err := validateFetchConfig(cfg); err != nil {
+		msg := "Error: WebFetch is misconfigured: " + err.Error()
+		return func(context.Context, json.RawMessage, *ToolContext) (Result, error) {
+			return Errorf(msg), nil
+		}
+	}
 	client := newFetchClient(cfg)
 	// direct is the no-proxy fallback used when a proxied fetch fails for a
 	// proxy-caused reason (closed tunnel / failed CONNECT / TLS or HTTP2 mismatch):

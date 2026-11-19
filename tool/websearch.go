@@ -115,7 +115,11 @@ func newSearchProvider(cfg WebSearchConfig) (searchProvider, error) {
 	if backend == "" {
 		backend = "ddgs"
 	}
-	client := newFetchClient(WebFetchConfig{Proxy: cfg.Proxy, CACert: cfg.CACert, InsecureTLS: cfg.InsecureTLS})
+	fetchCfg := WebFetchConfig{Proxy: cfg.Proxy, CACert: cfg.CACert, InsecureTLS: cfg.InsecureTLS}
+	if err := validateFetchConfig(fetchCfg); err != nil {
+		return nil, fmt.Errorf("web_search: %w", err)
+	}
+	client := newFetchClient(fetchCfg)
 	switch backend {
 	case "ddgs":
 		return &ddgsProvider{client: client, endpoint: ddgsEndpoint}, nil
