@@ -45,7 +45,7 @@ func NewStore(dir string) *Store { return &Store{Dir: dir} }
 
 const indexFile = "MEMORY.md"
 
-func (s *Store) ensure() error { return os.MkdirAll(s.Dir, 0o755) }
+func (s *Store) ensure() error { return os.MkdirAll(s.Dir, 0o700) }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
@@ -108,7 +108,7 @@ func (s *Store) Save(m Memory) error {
 		return fmt.Errorf("memory: name is required")
 	}
 	path := filepath.Join(s.Dir, slug(m.Name)+".md")
-	if err := os.WriteFile(path, []byte(renderFrontmatter(m)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(renderFrontmatter(m)), 0o600); err != nil {
 		return err
 	}
 	return s.rebuildIndex()
@@ -124,7 +124,7 @@ func (s *Store) Index() string {
 }
 
 func (s *Store) rebuildIndex() error {
-	return os.WriteFile(filepath.Join(s.Dir, indexFile), []byte(s.buildIndex()), 0o644)
+	return os.WriteFile(filepath.Join(s.Dir, indexFile), []byte(s.buildIndex()), 0o600)
 }
 
 func (s *Store) buildIndex() string {
