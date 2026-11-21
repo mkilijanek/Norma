@@ -45,8 +45,16 @@ import (
 //	Docker --privileged, private cgroupns, entrypoint
 //	  moved to /init and +memory enabled at the root works (the cgroupns root is the
 //	                                                 sole-subgroup parent)
-//	kernels without cgroup.kill / memory.peak        covered by unit tests that
+//	real kernel 5.14.0-741.el9 (RHEL 9 line, qemu)  works; kernel kill in 0.4 s,
+//	                                                 memory.peak present
+//	real kernels 6.12.118 and 7.3.5 (mainline, qemu) work; kernel kill in ~1.6 s
+//	                                                 under software emulation
+//	real kernel 5.4 (Ubuntu 20.04, qemu)             no clone3: Spawn falls back, the
+//	                                                 sampler kills the allocator
+//	kernels without cgroup.kill / memory.peak        also covered by unit tests that
 //	                                                 emulate the missing files
+//
+// scripts/qemu-kernel-test.sh reruns the kernel checks under any kernel image.
 //
 // Everything is best effort: any failure means "no cgroup for this task" and the
 // sampler alone guards it. NORMA_TASK_CGROUP=off disables the tier.
