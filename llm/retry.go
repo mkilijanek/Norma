@@ -48,7 +48,7 @@ func doStream(ctx context.Context, cfg Config, url string, body []byte, setHeade
 			if err != nil {
 				return nil, err
 			}
-			data, _ := io.ReadAll(resp.Body)
+			data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBytes))
 			resp.Body.Close()
 			return nil, fmt.Errorf("%s: status %d: %s", errPrefix, resp.StatusCode, strings.TrimSpace(string(data)))
 		}
