@@ -47,6 +47,8 @@ import (
 //	                                                 sole-subgroup parent)
 //	real kernel 5.14.0-741.el9 (RHEL 9 line, qemu)  works; kernel kill in 0.4 s,
 //	                                                 memory.peak present
+//	real kernels 6.12.118 and 7.3.5 (mainline, qemu) work; kernel kill in ~1.6 s
+//	                                                 under software emulation
 //	real kernel 5.4 (Ubuntu 20.04, qemu)             no clone3: Spawn falls back, the
 //	                                                 sampler kills the allocator
 //	kernels without cgroup.kill / memory.peak        also covered by unit tests that
