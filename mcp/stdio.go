@@ -3,8 +3,9 @@ package mcp
 import (
 	"context"
 	"io"
-	"os"
 	"os/exec"
+
+	"github.com/Autumn-27/norma/internal/envscrub"
 )
 
 // stdioCloser shuts down a spawned MCP server process and its pipes.
@@ -31,8 +32,8 @@ func (s *stdioCloser) Close() error {
 // applied on top of the parent process environment; pass nil for none.
 func NewStdioClient(ctx context.Context, server, command string, env map[string]string, args ...string) (*Client, error) {
 	cmd := exec.Command(command, args...)
-	if len(env) > 0 {
-		cmd.Env = os.Environ()
+	if len(env) > 0 || envscrub.Enabled() {
+		cmd.Env = envscrub.Environ()
 		for k, v := range env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}

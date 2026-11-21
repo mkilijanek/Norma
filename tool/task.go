@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Autumn-27/norma/internal/envscrub"
 )
 
 // Background task execution.
@@ -179,7 +181,7 @@ func withEnv(extra []string) []string {
 			drop[k] = true
 		}
 	}
-	base := os.Environ()
+	base := envscrub.Environ()
 	out := make([]string, 0, len(base)+len(nonInteractiveEnv)+len(extra))
 	for _, kv := range base {
 		if k := envKey(kv); k != "" && drop[k] {
