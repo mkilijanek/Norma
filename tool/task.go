@@ -465,7 +465,14 @@ func (m *Manager) terminate(t *Task, status TaskStatus, oversize bool) {
 
 // memKill is the guard's kill callback: record why, then take down the process
 // group and any members that escaped it.
-func (m *Manager) memKill(t *Task, reason string, pids []int) {
+//
+// The members were measured up to a sample interval ago, so each pid is checked
+// against its recorded start time before it is signalled: a pid that was reused
+// by an unrelated process is left alone. The process handle is opened first
+// (a pidfd where the kernel has one, which then names this exact process), and
+// the start time is checked second, so reuse after the check cannot misdirect
+// the signal either.
+func (m *Manager) memKill(t *Task, reason string, targets []memTarget) {
 	m.mu.Lock()
 	if t.Status != TaskRunning {
 		m.mu.Unlock()
@@ -479,10 +486,15 @@ func (m *Manager) memKill(t *Task, reason string, pids []int) {
 		treeKill(proc)
 	}
 	t.cg.kill()
-	for _, pid := range pids {
-		if p, err := os.FindProcess(pid); err == nil {
+	for _, tg := range targets {
+		p, err := os.FindProcess(tg.PID)
+		if err != nil {
+			continue
+		}
+		if m.guard.stillSame(tg) {
 			_ = p.Kill()
 		}
+		_ = p.Release()
 	}
 }
 

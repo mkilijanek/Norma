@@ -196,6 +196,10 @@ type procSource interface {
 	AnonExact(pid int) (uint64, bool)
 	// Available is the host's MemAvailable in bytes (false = unknown).
 	Available() (uint64, bool)
+	// Start is the process start time (the procEntry.Start figure); false when
+	// the process is gone. It lets a kill confirm a pid still names the process
+	// that was measured.
+	Start(pid int) (uint64, bool)
 	// HasTag reports whether the process environment carries tag.
 	HasTag(pid int, tag string) bool
 }
@@ -220,7 +224,7 @@ type guardTask struct {
 type memGuard struct {
 	src  procSource
 	pol  memPolicy
-	kill func(t *Task, reason string, pids []int)
+	kill func(t *Task, reason string, targets []memTarget)
 
 	mu      sync.Mutex
 	tasks   map[string]*guardTask
@@ -228,7 +232,7 @@ type memGuard struct {
 	ctx     context.Context
 }
 
-func newMemGuard(ctx context.Context, src procSource, pol memPolicy, kill func(*Task, string, []int)) *memGuard {
+func newMemGuard(ctx context.Context, src procSource, pol memPolicy, kill func(*Task, string, []memTarget)) *memGuard {
 	if src == nil || !pol.enabled() {
 		return nil
 	}
@@ -286,10 +290,32 @@ func (g *memGuard) loop() {
 	}
 }
 
+// memTarget identifies a process to kill: the pid alone is not enough, because a
+// pid can be reused between measuring and killing.
+type memTarget struct {
+	PID   int
+	Start uint64
+}
+
 type memKill struct {
-	gt     *guardTask
-	reason string
-	pids   []int
+	gt      *guardTask
+	reason  string
+	targets []memTarget
+}
+
+// targetsOf pairs the task's member pids with the start times seen in table.
+func targetsOf(gt *guardTask, table procTable) []memTarget {
+	out := make([]memTarget, 0, len(gt.members))
+	for _, pid := range gt.members {
+		out = append(out, memTarget{PID: pid, Start: table[pid].Start})
+	}
+	return out
+}
+
+// stillSame reports whether pid still names the process measured at t.Start.
+func (g *memGuard) stillSame(t memTarget) bool {
+	start, ok := g.src.Start(t.PID)
+	return ok && start == t.Start
 }
 
 // pass samples every task that is due and kills offenders. Kills run after the
@@ -321,7 +347,7 @@ func (g *memGuard) pass(now time.Time) {
 		if gt.anon > g.pol.PerTask {
 			g.sample(gt, table, now, true) // confirm with the share-aware figure
 			if gt.anon > g.pol.PerTask {
-				kills = append(kills, memKill{gt, g.reason(gt, g.pol.PerTask, "per-task limit"), gt.members})
+				kills = append(kills, memKill{gt, g.reason(gt, g.pol.PerTask, "per-task limit"), targetsOf(gt, table)})
 				continue
 			}
 		}
@@ -352,7 +378,7 @@ func (g *memGuard) pass(now time.Time) {
 			if total > g.pol.Total && largest != nil {
 				reason := g.reason(largest, g.pol.Total, "combined limit for all background tasks")
 				reason += fmt.Sprintf(" (all tasks together held %s)", humanBytes(total))
-				kills = append(kills, memKill{largest, reason, largest.members})
+				kills = append(kills, memKill{largest, reason, targetsOf(largest, table)})
 			}
 		}
 	}
@@ -367,7 +393,7 @@ func (g *memGuard) pass(now time.Time) {
 	g.mu.Unlock()
 
 	for _, k := range kills {
-		g.kill(k.gt.t, k.reason, k.pids)
+		g.kill(k.gt.t, k.reason, k.targets)
 	}
 }
 
@@ -400,7 +426,7 @@ func (g *memGuard) pressure(table procTable, now time.Time) (memKill, bool) {
 	reason = strings.Replace(reason, fmt.Sprintf(", limit %s", humanBytes(g.pol.MinAvail)), "", 1)
 	reason += fmt.Sprintf(" (the host had only %s available, below its %s reserve; background tasks held %s)",
 		humanBytes(avail), humanBytes(g.pol.MinAvail), humanBytes(total))
-	return memKill{largest, reason, largest.members}, true
+	return memKill{largest, reason, targetsOf(largest, table)}, true
 }
 
 // sample refreshes gt's membership and memory figures. exact selects the
