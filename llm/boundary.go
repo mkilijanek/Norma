@@ -145,3 +145,121 @@ func PairToolBlocks(msgs []Message) []Message {
 	}
 	return out
 }
+
+// NormalizeToolExchanges makes msgs satisfy the structure strict providers
+// validate, repairing rather than rejecting:
+//
+//   - a repeated tool_use id, or a repeated tool_result for one id, keeps only
+//     its first occurrence;
+//   - a tool_result that does not come after the message declaring its tool_use
+//     is dropped, and its tool_use with it (see PairToolBlocks);
+//   - messages sitting between a tool_use message and the message carrying its
+//     results (a rendered summary, a nudge) are moved to after the exchange, so
+//     the results directly follow their calls.
+//
+// A well-formed history passes through unchanged. Nothing is synthesized.
+func NormalizeToolExchanges(msgs []Message) []Message {
+	msgs = dedupeToolBlocks(msgs)
+	msgs = dropResultsBeforeUse(msgs)
+	msgs = PairToolBlocks(msgs)
+	return closeToolExchanges(msgs)
+}
+
+func dedupeToolBlocks(msgs []Message) []Message {
+	seenUse := map[string]bool{}
+	seenRes := map[string]bool{}
+	out := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		kept := m.Content[:0:0]
+		for _, b := range m.Content {
+			switch b.Type {
+			case BlockToolUse:
+				if seenUse[b.ID] {
+					continue
+				}
+				seenUse[b.ID] = true
+			case BlockToolResult:
+				if seenRes[b.ToolUseID] {
+					continue
+				}
+				seenRes[b.ToolUseID] = true
+			}
+			kept = append(kept, b)
+		}
+		if len(kept) > 0 {
+			out = append(out, Message{Role: m.Role, Content: kept})
+		}
+	}
+	return out
+}
+
+// dropResultsBeforeUse removes tool_results positioned at or before the message
+// that declares their tool_use.
+func dropResultsBeforeUse(msgs []Message) []Message {
+	useAt := map[string]int{}
+	for i, m := range msgs {
+		for _, b := range m.Content {
+			if b.Type == BlockToolUse {
+				useAt[b.ID] = i
+			}
+		}
+	}
+	out := make([]Message, 0, len(msgs))
+	for i, m := range msgs {
+		kept := m.Content[:0:0]
+		for _, b := range m.Content {
+			if b.Type == BlockToolResult {
+				if u, ok := useAt[b.ToolUseID]; ok && i <= u {
+					continue
+				}
+			}
+			kept = append(kept, b)
+		}
+		if len(kept) > 0 {
+			out = append(out, Message{Role: m.Role, Content: kept})
+		}
+	}
+	return out
+}
+
+// closeToolExchanges moves unrelated messages out from between a tool_use
+// message and the messages carrying its results.
+func closeToolExchanges(msgs []Message) []Message {
+	out := make([]Message, 0, len(msgs))
+	queue := append([]Message(nil), msgs...)
+	for len(queue) > 0 {
+		m := queue[0]
+		queue = queue[1:]
+		out = append(out, m)
+
+		need := map[string]bool{}
+		for _, b := range m.Content {
+			if b.Type == BlockToolUse {
+				need[b.ID] = true
+			}
+		}
+		if len(need) == 0 {
+			continue
+		}
+		var deferred, rest []Message
+		k := 0
+		for ; k < len(queue) && len(need) > 0; k++ {
+			carries := false
+			for _, b := range queue[k].Content {
+				if b.Type == BlockToolResult && need[b.ToolUseID] {
+					carries = true
+					delete(need, b.ToolUseID)
+				}
+			}
+			if carries {
+				out = append(out, queue[k])
+			} else {
+				deferred = append(deferred, queue[k])
+			}
+		}
+		rest = append(rest, deferred...)
+		rest = append(rest, queue[k:]...)
+		queue = rest
+	}
+	return out
+}
