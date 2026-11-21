@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Autumn-27/norma/permission"
@@ -153,9 +155,71 @@ func runBashManaged(ctx context.Context, tc *ToolContext, command string, timeou
 	return Errorf(Capture(tc, out) + fmt.Sprintf("\n\n[command timed out after %s]", timeout)), nil
 }
 
-// runBashSync is the original blocking implementation, used when no task manager
-// is available (background execution disabled).
+// syncManager is the process-wide task manager behind the synchronous Bash path.
+// It exists so that path gets the same memory guard (sampler + cgroup tier) as
+// background tasks. nil when it could not be created; callers then run unguarded.
+type syncBox struct {
+	once sync.Once
+	m    *Manager
+}
+
+var syncShared = &syncBox{}
+
+func syncManager() *Manager {
+	box := syncShared
+	box.once.Do(func() {
+		box.m, _ = NewManager(fmt.Sprintf("sync-%d", os.Getpid()))
+	})
+	return box.m
+}
+
+// runBashSync runs the command to completion, blocking. It is used when no task
+// manager is on the context (or background execution is disabled). The command
+// still runs under the memory guard; on timeout it is killed, never backgrounded.
 func runBashSync(ctx context.Context, tc *ToolContext, command string, timeout time.Duration) (Result, error) {
+	m := syncManager()
+	if m == nil || (m.guard == nil && m.cgroups == nil) {
+		return runBashUnguarded(ctx, tc, command, timeout)
+	}
+	spec := SpawnSpec{Command: command, Kind: KindBash, Description: short(command)}
+	if tc != nil {
+		spec.WorkingDir, spec.Env = tc.WorkingDir, tc.Env
+	}
+	t, finished, output, err := m.RunForeground(ctx, spec, timeout)
+	if t != nil {
+		defer m.Forget(t.ID)
+	}
+	if err != nil {
+		if t == nil { // could not start
+			return Errorf(fmt.Sprintf("failed to run: %v", err)), nil
+		}
+		return Errorf("Error: " + err.Error()), nil
+	}
+	if !finished {
+		out, _ := m.Output(t.ID, 0)
+		m.Kill(t.ID)
+		<-t.done
+		return Errorf(Capture(tc, out) + fmt.Sprintf("\n\n[command timed out after %s]", timeout)), nil
+	}
+	info, _ := m.Get(t.ID)
+	if info.KillReason != "" {
+		return Errorf(fmt.Sprintf("%s\n\n[%s]", Capture(tc, output), info.KillReason)), nil
+	}
+	if info.Status == TaskFailed {
+		if strings.TrimSpace(output) == "" {
+			output = "(no output)"
+		}
+		return Errorf(fmt.Sprintf("%s\n\n[exit code %d]", Capture(tc, output), info.ExitCode)), nil
+	}
+	if strings.TrimSpace(output) == "" {
+		output = "(command produced no output)"
+	}
+	return Text(Capture(tc, output)), nil
+}
+
+// runBashUnguarded is the original blocking implementation, kept for hosts where
+// no guarded manager can be created.
+func runBashUnguarded(ctx context.Context, tc *ToolContext, command string, timeout time.Duration) (Result, error) {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

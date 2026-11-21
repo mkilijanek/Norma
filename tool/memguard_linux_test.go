@@ -3,6 +3,7 @@
 package tool
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,9 +103,15 @@ func TestMemGuardKillsSetsidEscapee(t *testing.T) {
 		t.Fatalf("status=%s reason=%q", info.Status, info.KillReason)
 	}
 	// The escapee itself must be gone, not just the shell.
-	time.Sleep(300 * time.Millisecond)
-	out, _ := exec.Command("pgrep", "-f", "-c", "--", exe).Output()
-	if n, _ := strconv.Atoi(strings.TrimSpace(string(out))); n > 1 { // 1 = this test binary
+	// Poll: a killed process may take a moment to disappear from the table.
+	var n int
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		out, _ := exec.Command("pgrep", "-f", "-c", "--", exe).Output()
+		if n, _ = strconv.Atoi(strings.TrimSpace(string(out))); n <= 1 || time.Now().After(deadline) { // 1 = this test binary
+			break
+		}
+	}
+	if n > 1 {
 		t.Fatalf("%d copies of the leaker still alive", n-1)
 	}
 }
@@ -115,5 +122,48 @@ func BenchmarkSnapshot(b *testing.B) {
 		if _, err := src.Snapshot(); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// The synchronous Bash path must be guarded like a background task.
+func TestRunBashSyncIsGuarded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns a process")
+	}
+	t.Setenv(memCapEnv, "150M")
+	old := syncShared
+	syncShared = &syncBox{} // rebuild the shared manager under the test's cap
+	defer func() { syncShared = old }()
+	if m := syncManager(); m == nil || m.guard == nil {
+		t.Skip("guard unavailable")
+	}
+	exe, _ := os.Executable()
+	done := make(chan Result, 1)
+	go func() {
+		r, _ := runBashSync(context.Background(), &ToolContext{WorkingDir: t.TempDir()}, "NORMA_TEST_ALLOC_MB=400 exec "+exe, time.Minute)
+		done <- r
+	}()
+	select {
+	case r := <-done:
+		if !r.IsError || !strings.Contains(r.Flatten(), "memory limit exceeded") {
+			t.Fatalf("result: %+v", r)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("sync command was not killed within 20s")
+	}
+}
+
+func TestRunBashSyncStillWorks(t *testing.T) {
+	r, _ := runBashSync(context.Background(), &ToolContext{WorkingDir: t.TempDir()}, "echo hi; exit 0", 10*time.Second)
+	if r.IsError || !strings.Contains(r.Flatten(), "hi") {
+		t.Fatalf("ok: %+v", r)
+	}
+	r, _ = runBashSync(context.Background(), &ToolContext{WorkingDir: t.TempDir()}, "echo bad; exit 3", 10*time.Second)
+	if !r.IsError || !strings.Contains(r.Flatten(), "[exit code 3]") {
+		t.Fatalf("exit code: %+v", r)
+	}
+	r, _ = runBashSync(context.Background(), &ToolContext{WorkingDir: t.TempDir()}, "sleep 30", 300*time.Millisecond)
+	if !r.IsError || !strings.Contains(r.Flatten(), "timed out") {
+		t.Fatalf("timeout: %+v", r)
 	}
 }
