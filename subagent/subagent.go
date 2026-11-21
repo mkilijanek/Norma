@@ -33,7 +33,15 @@ type Config struct {
 	Agents      map[string]Definition
 	MaxDepth    int // default 3
 	CanUseTool  permission.CanUseTool
-	Hooks       harness.HookRunner
+	// Allowed / Disallowed are the parent's permission rules. They are applied
+	// inside every subagent so a deny rule cannot be sidestepped by delegating.
+	Allowed    []string
+	Disallowed []string
+	// ParentMode reports the parent's current permission mode. A subagent whose
+	// definition sets no mode inherits it, and a parent in plan mode confines
+	// every subagent to plan mode. Nil means the default mode.
+	ParentMode func() permission.Mode
+	Hooks      harness.HookRunner
 	// Transcript, when non-nil, persists each subagent run to its own sidechain
 	// file under the parent session (whose id is read from the context). Subagent
 	// tokens are recorded there, separate from the parent's totals.
@@ -138,7 +146,9 @@ func run(ctx context.Context, cfg Config, def Definition, agentType, prompt, wor
 		ToolOutputDir:           cfg.ToolOutputDir,
 		MaxToolOutputChars:      cfg.MaxToolOutputChars,
 		UntrustedOutputBoundary: cfg.UntrustedOutputBoundary,
-		PermissionMode:          def.PermissionMode,
+		PermissionMode:          childMode(cfg, def),
+		Allowed:                 cfg.Allowed,
+		Disallowed:              cfg.Disallowed,
 		CanUseTool:              cfg.CanUseTool,
 		Hooks:                   cfg.Hooks,
 	}
@@ -185,4 +195,20 @@ func filterTools(parent *tool.Registry, names []string) *tool.Registry {
 		}
 	}
 	return tool.NewRegistry(sel...)
+}
+
+// childMode picks a subagent's permission mode: its own, else the parent's; a
+// parent in plan mode always wins so delegation cannot escape read-only.
+func childMode(cfg Config, def Definition) permission.Mode {
+	var parent permission.Mode
+	if cfg.ParentMode != nil {
+		parent = cfg.ParentMode()
+	}
+	if parent == permission.ModePlan {
+		return permission.ModePlan
+	}
+	if def.PermissionMode != "" {
+		return def.PermissionMode
+	}
+	return parent
 }

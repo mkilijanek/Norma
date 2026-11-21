@@ -227,3 +227,28 @@ func TestFilterTools(t *testing.T) {
 		t.Error("filtering must not mutate the parent registry")
 	}
 }
+
+// A parent deny rule must hold inside a subagent, even one in bypass mode.
+func TestParentDenyRuleAppliesInSubagent(t *testing.T) {
+	got := subagentToolResult(t, Config{Disallowed: []string{"Big"}}, "SECRET")
+	if strings.Contains(got, "SECRET") || !strings.Contains(got, "disallowed") {
+		t.Fatalf("deny rule not enforced in subagent: %q", got)
+	}
+}
+
+func TestChildModeInheritanceAndPlanConfinement(t *testing.T) {
+	mode := func(m permission.Mode) func() permission.Mode { return func() permission.Mode { return m } }
+	for _, c := range []struct {
+		parent, def, want permission.Mode
+	}{
+		{permission.ModePlan, permission.ModeBypass, permission.ModePlan},
+		{permission.ModeAcceptEdits, "", permission.ModeAcceptEdits},
+		{permission.ModeAcceptEdits, permission.ModeDefault, permission.ModeDefault},
+		{"", "", ""},
+	} {
+		got := childMode(Config{ParentMode: mode(c.parent)}, Definition{PermissionMode: c.def})
+		if got != c.want {
+			t.Errorf("parent=%q def=%q: got %q want %q", c.parent, c.def, got, c.want)
+		}
+	}
+}

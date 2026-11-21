@@ -40,7 +40,9 @@ type Config struct {
 	MaxDepth       int // subagent recursion cap (default 3)
 	MaxParallel    int // bounded concurrency for RunParallel (default 4)
 	CanUseTool     permission.CanUseTool
-	Hooks          harness.HookRunner
+	// Allowed / Disallowed are the coordinator's permission rules, applied to workers.
+	Allowed, Disallowed []string
+	Hooks               harness.HookRunner
 	// ToolOutputDir, MaxToolOutputChars and UntrustedOutputBoundary are passed
 	// to every worker unchanged (see subagent.Config), so worker tool output is
 	// spilled, capped and framed the same way as the coordinator's.
@@ -70,6 +72,8 @@ func (c *Config) subagentConfig() subagent.Config {
 		ParentTools: c.WorkerTools,
 		MaxDepth:    c.MaxDepth,
 		CanUseTool:  c.CanUseTool,
+		Allowed:     c.Allowed,
+		Disallowed:  c.Disallowed,
 		Hooks:       c.Hooks,
 
 		ToolOutputDir:           c.ToolOutputDir,
