@@ -218,3 +218,46 @@ func TestCgroupCloseRemovesManagerGroup(t *testing.T) {
 	}
 	(*cgroupTier)(nil).close() // nil-safe
 }
+
+// Kernels before 5.14 have no cgroup.kill: the fallback walks cgroup.procs.
+// Making cgroup.kill a directory emulates "the write fails".
+func TestCgroupKillFallbackWalksProcs(t *testing.T) {
+	var pids []string
+	var cmds []*exec.Cmd
+	for i := 0; i < 2; i++ {
+		c := exec.Command("sleep", "60")
+		if err := c.Start(); err != nil {
+			t.Skip("no sleep binary")
+		}
+		cmds = append(cmds, c)
+		pids = append(pids, strconv.Itoa(c.Process.Pid))
+	}
+	defer func() {
+		for _, c := range cmds {
+			_ = c.Process.Kill()
+			_, _ = c.Process.Wait()
+		}
+	}()
+	dir := t.TempDir()
+	_ = os.Mkdir(filepath.Join(dir, "cgroup.kill"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "cgroup.procs"), []byte(strings.Join(pids, "\n")+"\n"), 0o644)
+	(&cgroupTask{dir: dir}).kill()
+	for _, c := range cmds {
+		done := make(chan error, 1)
+		go func() { _, err := c.Process.Wait(); done <- err }()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("pid %d survived the fallback kill", c.Process.Pid)
+		}
+	}
+}
+
+// Kernels before 5.19 have no memory.peak: the reason must still be sensible.
+func TestCgroupOOMReasonWithoutPeak(t *testing.T) {
+	g := &cgroupTask{dir: t.TempDir(), limit: 200 << 20}
+	r := g.oomReason()
+	if !strings.Contains(r, "memory limit exceeded") || strings.Contains(r, "peak") || strings.Contains(r, "combined") {
+		t.Fatalf("reason without peak: %q", r)
+	}
+}
