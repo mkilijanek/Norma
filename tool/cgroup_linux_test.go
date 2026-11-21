@@ -261,3 +261,29 @@ func TestCgroupOOMReasonWithoutPeak(t *testing.T) {
 		t.Fatalf("reason without peak: %q", r)
 	}
 }
+
+// When the kernel refuses CLONE_INTO_CGROUP (clone3 needs 5.7+, or the group is
+// not a real cgroup), Spawn must retry without the cgroup and run the task under
+// the sampler alone. A plain directory stands in for a cgroup the kernel rejects.
+func TestSpawnFallsBackWhenKernelRejectsCgroup(t *testing.T) {
+	m, err := NewManager("cgroup-fallback-" + strconv.Itoa(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Cleanup()
+	fake, _ := fakeTier(t)
+	m.cgroups = fake
+	task, err := m.Spawn(SpawnSpec{Command: "echo ran", Kind: KindBash, WorkingDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Spawn must fall back, got %v", err)
+	}
+	<-task.done
+	out, _ := m.Output(task.ID, 0)
+	info, _ := m.Get(task.ID)
+	if info.Status != TaskCompleted || !strings.Contains(out, "ran") {
+		t.Fatalf("status=%s out=%q", info.Status, out)
+	}
+	if task.cg != nil {
+		t.Error("the fallback run must not carry a cgroup")
+	}
+}
