@@ -59,12 +59,21 @@ const (
 
 	// memTagEnv is set in every task's environment; its value identifies the task.
 	memTagEnv = "NORMA_TASK_TAG"
+
+	// memReserveEnv overrides the host headroom floor (see memPolicy.MinAvail): a
+	// size, a percentage of the budget, or "off".
+	memReserveEnv = "NORMA_TASK_MEM_RESERVE"
 )
 
 // memPolicy is the resolved set of limits in bytes. Zero PerTask means disabled.
 type memPolicy struct {
 	PerTask uint64
 	Total   uint64
+	// MinAvail is the host headroom floor: when MemAvailable drops below it and the
+	// tasks hold enough memory to close the gap, the largest task is killed. Caps
+	// are fractions of the budget, so they cannot see memory that other processes
+	// already use. Zero disables the check.
+	MinAvail uint64
 }
 
 func (p memPolicy) enabled() bool { return p.PerTask > 0 }
@@ -92,7 +101,28 @@ func loadMemPolicy(src procSource) memPolicy {
 	if total < perTask {
 		total = perTask
 	}
-	return memPolicy{PerTask: perTask, Total: total}
+	return memPolicy{PerTask: perTask, Total: total, MinAvail: loadReserve(budget)}
+}
+
+// loadReserve resolves the headroom floor: 5% of the budget, at least 256 MiB,
+// at most a quarter of the budget, unless NORMA_TASK_MEM_RESERVE says otherwise.
+func loadReserve(budget uint64) uint64 {
+	if raw := strings.TrimSpace(os.Getenv(memReserveEnv)); raw != "" {
+		if c, off, ok := parseMemCap(raw, budget); ok {
+			if off {
+				return 0
+			}
+			return c
+		}
+	}
+	r := budget / 20
+	if r < 256<<20 {
+		r = 256 << 20
+	}
+	if q := budget / 4; r > q {
+		r = q
+	}
+	return r
 }
 
 // parseMemCap parses "2G", "512MiB", "1.5g", "40%" or an off-word. ok=false means
@@ -164,6 +194,8 @@ type procSource interface {
 	Anon(pid int) (uint64, bool)
 	// AnonExact is the slower, share-aware figure (Pss_Anon + Pss_Shmem + SwapPss).
 	AnonExact(pid int) (uint64, bool)
+	// Available is the host's MemAvailable in bytes (false = unknown).
+	Available() (uint64, bool)
 	// HasTag reports whether the process environment carries tag.
 	HasTag(pid int, tag string) bool
 }
@@ -324,6 +356,11 @@ func (g *memGuard) pass(now time.Time) {
 			}
 		}
 	}
+	if len(kills) == 0 {
+		if k, ok := g.pressure(table, now); ok {
+			kills = append(kills, k)
+		}
+	}
 	for _, k := range kills {
 		delete(g.tasks, k.gt.t.ID)
 	}
@@ -332,6 +369,38 @@ func (g *memGuard) pass(now time.Time) {
 	for _, k := range kills {
 		g.kill(k.gt.t, k.reason, k.pids)
 	}
+}
+
+// pressure checks host headroom. When MemAvailable is under the floor and the
+// tasks together hold at least the missing amount (so killing them can help), the
+// largest task is killed. The figures are re-measured share-aware first, like the
+// other kill paths, and one task per pass: the next pass sees the new headroom.
+func (g *memGuard) pressure(table procTable, now time.Time) (memKill, bool) {
+	if g.pol.MinAvail == 0 || len(g.tasks) == 0 {
+		return memKill{}, false
+	}
+	avail, ok := g.src.Available()
+	if !ok || avail >= g.pol.MinAvail {
+		return memKill{}, false
+	}
+	var total uint64
+	var largest *guardTask
+	for _, gt := range g.tasks {
+		g.sample(gt, table, now, true)
+		total += gt.anon
+		if largest == nil || gt.anon > largest.anon {
+			largest = gt
+		}
+	}
+	shortfall := g.pol.MinAvail - avail
+	if largest == nil || total < shortfall {
+		return memKill{}, false // the pressure is not ours; killing tasks would not fix it
+	}
+	reason := g.reason(largest, g.pol.MinAvail, "host memory pressure")
+	reason = strings.Replace(reason, fmt.Sprintf(", limit %s", humanBytes(g.pol.MinAvail)), "", 1)
+	reason += fmt.Sprintf(" (the host had only %s available, below its %s reserve; background tasks held %s)",
+		humanBytes(avail), humanBytes(g.pol.MinAvail), humanBytes(total))
+	return memKill{largest, reason, largest.members}, true
 }
 
 // sample refreshes gt's membership and memory figures. exact selects the

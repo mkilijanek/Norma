@@ -26,6 +26,28 @@ func (linuxProc) Budget() uint64 {
 	return budget
 }
 
+// Available reads MemAvailable from /proc/meminfo.
+func (linuxProc) Available() (uint64, bool) {
+	b, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, false
+	}
+	return meminfoKB(b, "MemAvailable:")
+}
+
+func meminfoKB(b []byte, key string) (uint64, bool) {
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, key) {
+			if f := strings.Fields(line[len(key):]); len(f) > 0 {
+				if n, err := strconv.ParseUint(f[0], 10, 64); err == nil {
+					return n << 10, true
+				}
+			}
+		}
+	}
+	return 0, false
+}
+
 func memTotal() uint64 {
 	b, err := os.ReadFile("/proc/meminfo")
 	if err != nil {

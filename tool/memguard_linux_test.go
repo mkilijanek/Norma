@@ -167,3 +167,16 @@ func TestRunBashSyncStillWorks(t *testing.T) {
 		t.Fatalf("timeout: %+v", r)
 	}
 }
+
+func TestMeminfoAvailable(t *testing.T) {
+	n, ok := meminfoKB([]byte("MemTotal:  8000 kB\nMemAvailable:    1234 kB\n"), "MemAvailable:")
+	if !ok || n != 1234<<10 {
+		t.Fatalf("got %d %v", n, ok)
+	}
+	if _, ok := meminfoKB([]byte("MemTotal: 1 kB\n"), "MemAvailable:"); ok {
+		t.Fatal("missing key must report unknown")
+	}
+	if v, ok := newProcSource().Available(); !ok || v == 0 {
+		t.Fatalf("live MemAvailable: %d %v", v, ok)
+	}
+}
