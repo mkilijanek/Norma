@@ -37,6 +37,10 @@ import (
 //   - Budget: a per-task cap AND an aggregate cap across all tasks, derived from
 //     the effective limit (the tightest cgroup ancestor limit, else MemTotal).
 //     Over the aggregate, the largest task dies.
+//   - Kernel tier (cgroup_linux.go): where the host delegates a cgroup v2 with the
+//     memory controller, each task also runs under a kernel memory.max, so a leak
+//     faster than one sampler tick is stopped by the kernel itself. Best effort;
+//     NORMA_TASK_CGROUP=off disables it, and the sampler covers every other host.
 //   - Report: the kill reason names the peak, the growth rate and the largest
 //     process, and reaches the model on both the foreground and background paths.
 
