@@ -4,6 +4,7 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,6 +141,9 @@ func TestCgroupKernelKillsAllocator(t *testing.T) {
 		t.Fatal(err)
 	}
 	if task.cg == nil {
+		if !kernelHasCloneIntoCgroup() {
+			t.Skip("kernel < 5.7 has no CLONE_INTO_CGROUP; Spawn falls back to the sampler")
+		}
 		t.Fatal("task did not get a cgroup although the tier is available")
 	}
 	select {
@@ -173,6 +177,9 @@ func TestCgroupKernelSparesSmallTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-task.done
+	if task.cg == nil && !kernelHasCloneIntoCgroup() {
+		t.Skip("kernel < 5.7 has no CLONE_INTO_CGROUP; Spawn falls back to the sampler")
+	}
 	info, _ := m.Get(task.ID)
 	out, _ := m.Output(task.ID, 0)
 	if info.Status != TaskCompleted || info.KillReason != "" || !strings.Contains(out, "/norma-") {
@@ -286,4 +293,18 @@ func TestSpawnFallsBackWhenKernelRejectsCgroup(t *testing.T) {
 	if task.cg != nil {
 		t.Error("the fallback run must not carry a cgroup")
 	}
+}
+
+// kernelHasCloneIntoCgroup reports whether clone3 with CLONE_INTO_CGROUP exists
+// (Linux 5.7+). Older kernels make Spawn fall back, which is the expected outcome.
+func kernelHasCloneIntoCgroup() bool {
+	b, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return true
+	}
+	var major, minor int
+	if _, err := fmt.Sscanf(string(b), "%d.%d", &major, &minor); err != nil {
+		return true
+	}
+	return major > 5 || (major == 5 && minor >= 7)
 }
