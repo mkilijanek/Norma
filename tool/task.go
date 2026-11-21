@@ -70,10 +70,11 @@ type Task struct {
 	OutputPath  string
 
 	// internal, guarded by Manager.mu
-	backgrounded bool   // surfaced as a background task: notify on exit
-	notified     bool   // completion already enqueued into pending
-	oversize     bool   // terminated by the size watchdog
-	killReason   string // set when the memory guard terminated the task
+	backgrounded bool        // surfaced as a background task: notify on exit
+	notified     bool        // completion already enqueued into pending
+	oversize     bool        // terminated by the size watchdog
+	killReason   string      // set when the memory guard terminated the task
+	cg           *cgroupTask // kernel memory limit group; nil when unavailable
 	cmd          *exec.Cmd
 	done         chan struct{} // closed by watch when the process exits
 }
@@ -215,8 +216,9 @@ type Manager struct {
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 
-	guard  *memGuard // nil when disabled or unsupported
-	tagSeq string    // per-manager token for task environment tags
+	guard   *memGuard   // nil when disabled or unsupported
+	cgroups *cgroupTier // nil when the host gives us no writable cgroup v2
+	tagSeq  string      // per-manager token for task environment tags
 
 	// interactive PTY shell sessions (see shell_session.go). Separate map + mutex
 	// from the file-based tasks above: sessions are persistent, stdin-driven, and
@@ -249,7 +251,9 @@ func NewManager(sessionID string) (*Manager, error) {
 		tagSeq:     fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()),
 	}
 	src := newProcSource()
-	m.guard = newMemGuard(ctx, src, loadMemPolicy(src), m.memKill)
+	pol := loadMemPolicy(src)
+	m.guard = newMemGuard(ctx, src, pol, m.memKill)
+	m.cgroups = newCgroupTier(pol)
 	return m, nil
 }
 
@@ -338,19 +342,33 @@ func (m *Manager) Spawn(spec SpawnSpec) (*Task, error) {
 		kind = KindBash
 	}
 	shell, flags := shellCmd()
-	cmd := exec.CommandContext(m.rootCtx, shell, append(flags, spec.Command)...)
-	cmd.Dir = spec.WorkingDir
 	tag := m.tagSeq + ":" + id
-	cmd.Env = withEnv(append(append([]string(nil), spec.Env...), memTagEnv+"="+tag))
-	cmd.Stdout = f
-	cmd.Stderr = f
-	setDetached(cmd)
-
-	if err := cmd.Start(); err != nil {
+	build := func(withCgroup bool) (*exec.Cmd, *cgroupTask) {
+		cmd := exec.CommandContext(m.rootCtx, shell, append(flags, spec.Command)...)
+		cmd.Dir = spec.WorkingDir
+		cmd.Env = withEnv(append(append([]string(nil), spec.Env...), memTagEnv+"="+tag))
+		cmd.Stdout = f
+		cmd.Stderr = f
+		setDetached(cmd)
+		if withCgroup {
+			return cmd, m.cgroups.prepare(id, cmd)
+		}
+		return cmd, nil
+	}
+	cmd, cg := build(true)
+	err = cmd.Start()
+	if err != nil && cg != nil {
+		cg.discard() // the kernel refused the cgroup: run under the sampler alone
+		cmd, cg = build(false)
+		err = cmd.Start()
+	}
+	if err != nil {
+		cg.discard()
 		_ = f.Close()
 		_ = os.Remove(outPath)
 		return nil, err
 	}
+	cg.started()
 
 	t := &Task{
 		ID:          id,
@@ -361,6 +379,7 @@ func (m *Manager) Spawn(spec SpawnSpec) (*Task, error) {
 		StartTime:   time.Now(),
 		OutputPath:  outPath,
 		cmd:         cmd,
+		cg:          cg,
 		done:        make(chan struct{}),
 	}
 	m.mu.Lock()
@@ -379,12 +398,17 @@ func (m *Manager) watch(t *Task, f *os.File) {
 
 	err := t.cmd.Wait()
 	m.guard.remove(t.ID)
+	oomReason := t.cg.finish(m.rootCtx)
 	close(stop)
 	_ = f.Close()
 
 	m.mu.Lock()
 	if t.Status == TaskRunning { // not pre-empted by Kill / watchdog
-		if err == nil {
+		if oomReason != "" && err != nil { // the kernel killed it before the sampler noticed
+			t.killReason = oomReason
+			t.Status = TaskFailed
+			t.ExitCode = -1
+		} else if err == nil {
 			t.Status = TaskCompleted
 			t.ExitCode = 0
 		} else if ee, ok := err.(*exec.ExitError); ok {
@@ -436,6 +460,7 @@ func (m *Manager) terminate(t *Task, status TaskStatus, oversize bool) {
 	if proc != nil {
 		treeKill(proc)
 	}
+	t.cg.kill()
 }
 
 // memKill is the guard's kill callback: record why, then take down the process
@@ -453,6 +478,7 @@ func (m *Manager) memKill(t *Task, reason string, pids []int) {
 	if proc != nil {
 		treeKill(proc)
 	}
+	t.cg.kill()
 	for _, pid := range pids {
 		if p, err := os.FindProcess(pid); err == nil {
 			_ = p.Kill()
@@ -673,6 +699,7 @@ func (m *Manager) Cleanup() {
 	if m.rootCancel != nil {
 		m.rootCancel()
 	}
+	m.cgroups.close()
 }
 
 // tailFile reads the last maxBytes of a file, prefixing a notice when earlier
