@@ -102,3 +102,10 @@ covered. Opt out with `WebFetchConfig.AllowPrivate` or
 `NORMA_WEBFETCH_ALLOW_PRIVATE=1`. The guard does not apply when a proxy (config
 or `HTTP(S)_PROXY`) is used, since the proxy resolves the destination, or when
 the host supplies its own `DialContext`.
+
+## Task output directory
+
+Task output lives under `$TMPDIR/norma-<uid>/<session>/tasks/`. The per-user base
+is created `0700`, must be a real directory owned by the current user (symlinks
+and foreign owners are rejected), and output files are created
+`O_EXCL|O_NOFOLLOW`.

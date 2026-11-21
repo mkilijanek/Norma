@@ -66,9 +66,8 @@ func TestBackgroundTaskEndToEnd(t *testing.T) {
 	}
 
 	// The session's task temp dir exists while the task runs.
-	taskDir := filepath.Join(os.TempDir(), "norma", sess.SessionID())
-	if _, err := os.Stat(taskDir); err != nil {
-		t.Fatalf("task dir should exist: %v", err)
+	if m, _ := filepath.Glob(filepath.Join(os.TempDir(), "norma*", sess.SessionID())); len(m) == 0 {
+		t.Fatal("task dir should exist")
 	}
 
 	// Wait for the command to finish so its notification is queued.
@@ -91,8 +90,8 @@ func TestBackgroundTaskEndToEnd(t *testing.T) {
 	if err := sess.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
-		t.Fatalf("task dir should be removed after Close: %v", err)
+	if m, _ := filepath.Glob(filepath.Join(os.TempDir(), "norma*", sess.SessionID())); len(m) != 0 {
+		t.Fatalf("task dir should be removed after Close: %v", m)
 	}
 }
 
