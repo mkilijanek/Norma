@@ -35,6 +35,19 @@ import (
 // straight into their group (clone3 CLONE_INTO_CGROUP via SysProcAttr.CgroupFD),
 // so there is no window in which a fresh process runs outside it.
 //
+// Verified environments (see PR notes for how each was run):
+//
+//	systemd unit, Delegate=yes + DelegateSubgroup=   works (kernel kill in <0.1 s)
+//	systemd scope, Delegate=yes (no subgroup)        unavailable: our cgroup holds
+//	                                                 processes; sampler only
+//	Docker, private cgroupns, default (read-only
+//	  or process-holding root cgroup)                unavailable; sampler only
+//	Docker --privileged, private cgroupns, entrypoint
+//	  moved to /init and +memory enabled at the root works (the cgroupns root is the
+//	                                                 sole-subgroup parent)
+//	kernels without cgroup.kill / memory.peak        covered by unit tests that
+//	                                                 emulate the missing files
+//
 // Everything is best effort: any failure means "no cgroup for this task" and the
 // sampler alone guards it. NORMA_TASK_CGROUP=off disables the tier.
 
@@ -123,7 +136,7 @@ func (c *cgroupTier) setup() string {
 		}
 	}
 	parent := filepath.Dir(c.base)
-	if parent == c.base || parent == "/sys/fs/cgroup" || !soleSubgroup(parent, filepath.Base(c.base)) ||
+	if parent == c.base || !soleSubgroup(parent, filepath.Base(c.base)) ||
 		syscall.Access(parent, 2) != nil {
 		return ""
 	}
