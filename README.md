@@ -84,3 +84,11 @@ Coverage: both provider adapters over `httptest` SSE; the loop end-to-end with a
 ## Scope
 
 Implements the core loop, dual providers, tools, the full permission pipeline, compaction, hooks, subagents, and MCP — plus plan mode, long-term memory, the skill system, background tasks, deferred tools, transcript persistence with resume, and coordinator multi-agent orchestration.
+
+## Child process environment
+
+Bash tasks and MCP servers inherit the full process environment by default. To
+keep credentials (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `AWS_*`,
+`SSH_AUTH_SOCK`, ...) away from model-run commands, set
+`NORMA_SCRUB_ENV=secrets`; list exceptions in `NORMA_ENV_ALLOW=NAME1,NAME2`.
+Variables passed explicitly (task `Env`, MCP `env`) are always kept.
