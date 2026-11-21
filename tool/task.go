@@ -70,9 +70,10 @@ type Task struct {
 	OutputPath  string
 
 	// internal, guarded by Manager.mu
-	backgrounded bool // surfaced as a background task: notify on exit
-	notified     bool // completion already enqueued into pending
-	oversize     bool // terminated by the size watchdog
+	backgrounded bool   // surfaced as a background task: notify on exit
+	notified     bool   // completion already enqueued into pending
+	oversize     bool   // terminated by the size watchdog
+	killReason   string // set when the memory guard terminated the task
 	cmd          *exec.Cmd
 	done         chan struct{} // closed by watch when the process exits
 }
@@ -82,7 +83,7 @@ func (t *Task) info() TaskInfo {
 		ID: t.ID, Kind: t.Kind, Command: t.Command, Description: t.Description,
 		Status: t.Status, ExitCode: t.ExitCode,
 		StartTime: t.StartTime, EndTime: t.EndTime,
-		OutputPath: t.OutputPath, Backgrounded: t.backgrounded,
+		OutputPath: t.OutputPath, Backgrounded: t.backgrounded, KillReason: t.killReason,
 	}
 }
 
@@ -98,6 +99,8 @@ type TaskInfo struct {
 	EndTime      time.Time
 	OutputPath   string
 	Backgrounded bool
+	// KillReason is non-empty when the memory guard killed the task.
+	KillReason string
 }
 
 // Notification is surfaced to the model when a backgrounded task exits.
@@ -212,6 +215,9 @@ type Manager struct {
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 
+	guard  *memGuard // nil when disabled or unsupported
+	tagSeq string    // per-manager token for task environment tags
+
 	// interactive PTY shell sessions (see shell_session.go). Separate map + mutex
 	// from the file-based tasks above: sessions are persistent, stdin-driven, and
 	// keep an in-memory ring buffer rather than streaming to a file.
@@ -234,13 +240,17 @@ func NewManager(sessionID string) (*Manager, error) {
 	}
 	cleanStaleSessions(baseTaskDir(), sessionID)
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{
+	m := &Manager{
 		tasks:      map[string]*Task{},
 		sessions:   map[string]*ptySession{},
 		dir:        dir,
 		rootCtx:    ctx,
 		rootCancel: cancel,
-	}, nil
+		tagSeq:     fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()),
+	}
+	src := newProcSource()
+	m.guard = newMemGuard(ctx, src, loadMemPolicy(src), m.memKill)
+	return m, nil
 }
 
 // cleanStaleSessions removes sibling session directories older than the TTL —
@@ -330,7 +340,8 @@ func (m *Manager) Spawn(spec SpawnSpec) (*Task, error) {
 	shell, flags := shellCmd()
 	cmd := exec.CommandContext(m.rootCtx, shell, append(flags, spec.Command)...)
 	cmd.Dir = spec.WorkingDir
-	cmd.Env = withEnv(spec.Env)
+	tag := m.tagSeq + ":" + id
+	cmd.Env = withEnv(append(append([]string(nil), spec.Env...), memTagEnv+"="+tag))
 	cmd.Stdout = f
 	cmd.Stderr = f
 	setDetached(cmd)
@@ -357,6 +368,7 @@ func (m *Manager) Spawn(spec SpawnSpec) (*Task, error) {
 	m.order = append(m.order, id)
 	m.mu.Unlock()
 
+	m.guard.add(t, cmd.Process.Pid, tag)
 	go m.watch(t, f)
 	return t, nil
 }
@@ -366,6 +378,7 @@ func (m *Manager) watch(t *Task, f *os.File) {
 	go m.watchSize(t, stop)
 
 	err := t.cmd.Wait()
+	m.guard.remove(t.ID)
 	close(stop)
 	_ = f.Close()
 
@@ -425,9 +438,33 @@ func (m *Manager) terminate(t *Task, status TaskStatus, oversize bool) {
 	}
 }
 
+// memKill is the guard's kill callback: record why, then take down the process
+// group and any members that escaped it.
+func (m *Manager) memKill(t *Task, reason string, pids []int) {
+	m.mu.Lock()
+	if t.Status != TaskRunning {
+		m.mu.Unlock()
+		return
+	}
+	t.Status = TaskFailed
+	t.killReason = reason
+	proc := t.cmd.Process
+	m.mu.Unlock()
+	if proc != nil {
+		treeKill(proc)
+	}
+	for _, pid := range pids {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	}
+}
+
 func (m *Manager) notifFor(t *Task) Notification {
 	var sum string
 	switch {
+	case t.killReason != "":
+		sum = fmt.Sprintf("Task %q was terminated: %s", short(t.Command), t.killReason)
 	case t.oversize:
 		sum = fmt.Sprintf("Task %q was terminated because its output exceeded the limit (%s).", short(t.Command), t.Kind)
 	case t.Status == TaskCompleted:
