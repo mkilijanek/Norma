@@ -19,6 +19,7 @@ type fakeSrc struct {
 	anon  map[int]uint64
 	exact map[int]uint64
 	tags  map[int]string
+	avail uint64 // 0 = unknown
 }
 
 func (f *fakeSrc) Budget() uint64 { return 8 << 30 }
@@ -45,6 +46,7 @@ func (f *fakeSrc) AnonExact(pid int) (uint64, bool) {
 	}
 	return 0, false
 }
+func (f *fakeSrc) Available() (uint64, bool) { return f.avail, f.avail != 0 }
 func (f *fakeSrc) HasTag(pid int, tag string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -305,5 +307,77 @@ func TestMemGuardIgnoresFileMappings(t *testing.T) {
 	info, _ := m.Get(task.ID)
 	if info.KillReason != "" || info.Status != TaskCompleted {
 		t.Fatalf("file-backed memory was counted: status=%s reason=%q", info.Status, info.KillReason)
+	}
+}
+
+func twoTasks(avail uint64) (*fakeSrc, *memGuard, *[]killed) {
+	src := &fakeSrc{
+		table: procTable{100: {PPID: 1, PGRP: 100, Comm: "small"}, 200: {PPID: 1, PGRP: 200, Comm: "big"}},
+		anon:  map[int]uint64{100: 100 * mib, 200: 900 * mib},
+		avail: avail,
+	}
+	ks := &[]killed{}
+	g := newTestGuard(src, memPolicy{PerTask: 2000 * mib, Total: 4000 * mib, MinAvail: 512 * mib}, ks)
+	g.tasks["a"] = &guardTask{t: &Task{ID: "a"}, pgid: 100, tag: "x", escaped: map[int]uint64{}}
+	g.tasks["b"] = &guardTask{t: &Task{ID: "b"}, pgid: 200, tag: "y", escaped: map[int]uint64{}}
+	return src, g, ks
+}
+
+func TestGuardKillsLargestUnderHostPressure(t *testing.T) {
+	_, g, ks := twoTasks(100 * mib) // 412 MiB short; tasks hold 1000 MiB
+	g.pass(time.Now())
+	if len(*ks) != 1 || (*ks)[0].id != "b" || !strings.Contains((*ks)[0].reason, "host memory pressure") ||
+		!strings.Contains((*ks)[0].reason, "only 100.0 MiB available") {
+		t.Fatalf("kills = %+v", *ks)
+	}
+}
+
+func TestGuardIgnoresPressureItDidNotCause(t *testing.T) {
+	src, g, ks := twoTasks(100 * mib)
+	src.anon = map[int]uint64{100: 20 * mib, 200: 30 * mib} // tasks hold 50 MiB, shortfall 412 MiB
+	g.pass(time.Now())
+	if len(*ks) != 0 {
+		t.Fatalf("killed tasks that cannot fix the shortage: %+v", *ks)
+	}
+}
+
+func TestGuardPressureQuietWithHeadroom(t *testing.T) {
+	for _, avail := range []uint64{600 * mib, 0 /* unknown */} {
+		_, g, ks := twoTasks(avail)
+		g.pass(time.Now())
+		if len(*ks) != 0 {
+			t.Fatalf("avail=%d: %+v", avail, *ks)
+		}
+	}
+	_, g, ks := twoTasks(10 * mib)
+	g.pol.MinAvail = 0 // disabled
+	g.pass(time.Now())
+	if len(*ks) != 0 {
+		t.Fatalf("disabled check killed: %+v", *ks)
+	}
+}
+
+func TestLoadReserve(t *testing.T) {
+	t.Setenv(memReserveEnv, "")
+	if r := loadReserve(8 << 30); r != (8<<30)/20 {
+		t.Errorf("5%% default: %d", r)
+	}
+	if r := loadReserve(2 << 30); r != 256<<20 {
+		t.Errorf("floor: %d", r)
+	}
+	if r := loadReserve(512 << 20); r != 128<<20 {
+		t.Errorf("a quarter of a tiny budget: %d", r)
+	}
+	t.Setenv(memReserveEnv, "1G")
+	if r := loadReserve(8 << 30); r != 1<<30 {
+		t.Errorf("explicit: %d", r)
+	}
+	t.Setenv(memReserveEnv, "off")
+	if r := loadReserve(8 << 30); r != 0 {
+		t.Errorf("off: %d", r)
+	}
+	t.Setenv(memReserveEnv, "junk")
+	if r := loadReserve(8 << 30); r != (8<<30)/20 {
+		t.Errorf("junk falls back: %d", r)
 	}
 }
