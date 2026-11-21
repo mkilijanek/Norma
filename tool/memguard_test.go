@@ -47,6 +47,12 @@ func (f *fakeSrc) AnonExact(pid int) (uint64, bool) {
 	return 0, false
 }
 func (f *fakeSrc) Available() (uint64, bool) { return f.avail, f.avail != 0 }
+func (f *fakeSrc) Start(pid int) (uint64, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.table[pid]
+	return e.Start, ok
+}
 func (f *fakeSrc) HasTag(pid int, tag string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -60,7 +66,11 @@ type killed struct {
 }
 
 func newTestGuard(src *fakeSrc, pol memPolicy, out *[]killed) *memGuard {
-	return newMemGuard(context.Background(), src, pol, func(t *Task, reason string, pids []int) {
+	return newMemGuard(context.Background(), src, pol, func(t *Task, reason string, targets []memTarget) {
+		var pids []int
+		for _, tg := range targets {
+			pids = append(pids, tg.PID)
+		}
 		*out = append(*out, killed{t.ID, reason, pids})
 	})
 }

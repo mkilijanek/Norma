@@ -180,3 +180,55 @@ func TestMeminfoAvailable(t *testing.T) {
 		t.Fatalf("live MemAvailable: %d %v", v, ok)
 	}
 }
+
+// A pid that was reused by an unrelated process must not be killed.
+func TestMemKillSparesReusedPid(t *testing.T) {
+	m, err := NewManager("memkill-reuse-" + strconv.Itoa(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Cleanup()
+	if m.guard == nil {
+		t.Skip("guard unavailable")
+	}
+	bystander := exec.Command("sleep", "60") // plays the unrelated process that got the pid
+	if err := bystander.Start(); err != nil {
+		t.Skip("no sleep binary")
+	}
+	victim := exec.Command("sleep", "60") // a genuine member
+	if err := victim.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = bystander.Process.Kill()
+		_ = victim.Process.Kill()
+		_, _ = bystander.Process.Wait()
+		_, _ = victim.Process.Wait()
+	}()
+	startOf := func(pid int) uint64 { s, _ := m.guard.src.Start(pid); return s }
+
+	task, err := m.Spawn(SpawnSpec{Command: "sleep 60", Kind: KindBash, WorkingDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.memKill(task, "test", []memTarget{
+		{PID: bystander.Process.Pid, Start: startOf(bystander.Process.Pid) + 1}, // recorded start differs: pid was reused
+		{PID: victim.Process.Pid, Start: startOf(victim.Process.Pid)},           // still the measured process
+	})
+	waitGone := func(c *exec.Cmd) bool {
+		done := make(chan struct{})
+		go func() { _, _ = c.Process.Wait(); close(done) }()
+		select {
+		case <-done:
+			return true
+		case <-time.After(2 * time.Second):
+			return false
+		}
+	}
+	if !waitGone(victim) {
+		t.Error("the measured member was not killed")
+	}
+	if waitGone(bystander) { // Wait returns promptly only if it was killed (kill(pid,0) would still see a zombie)
+		t.Error("a process whose pid was reused was killed")
+	}
+}
