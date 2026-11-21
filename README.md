@@ -92,3 +92,13 @@ keep credentials (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `AWS_*`,
 `SSH_AUTH_SOCK`, ...) away from model-run commands, set
 `NORMA_SCRUB_ENV=secrets`; list exceptions in `NORMA_ENV_ALLOW=NAME1,NAME2`.
 Variables passed explicitly (task `Env`, MCP `env`) are always kept.
+
+## WebFetch network guard
+
+WebFetch refuses direct connections to loopback, private, link-local (including
+cloud metadata `169.254.169.254`), CGNAT and multicast addresses. The check runs
+on the resolved IP of every connection, so redirects and DNS rebinding are
+covered. Opt out with `WebFetchConfig.AllowPrivate` or
+`NORMA_WEBFETCH_ALLOW_PRIVATE=1`. The guard does not apply when a proxy (config
+or `HTTP(S)_PROXY`) is used, since the proxy resolves the destination, or when
+the host supplies its own `DialContext`.

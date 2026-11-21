@@ -129,7 +129,7 @@ func forwardProxy(t *testing.T) (*httptest.Server, *counter) {
 // before: default client without a proxy/TLS option, custom transport with the
 // default dialer otherwise, and the direct retry present whenever a proxy is set.
 func TestWebFetchDialerNilUnchanged(t *testing.T) {
-	if c := newFetchClient(WebFetchConfig{}); c.Transport != nil {
+	if c := newFetchClient(WebFetchConfig{AllowPrivate: true}); c.Transport != nil {
 		t.Fatalf("zero config must keep the default transport, got %T", c.Transport)
 	}
 	for _, cfg := range []WebFetchConfig{{Proxy: deadProxy}, {InsecureTLS: true}} {

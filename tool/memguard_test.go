@@ -244,6 +244,9 @@ func TestMain(m *testing.M) {
 		_ = buf[0]
 		os.Exit(0)
 	}
+	// Existing WebFetch tests fetch from loopback httptest servers; the SSRF
+	// guard has its own tests, which clear this.
+	os.Setenv(WebFetchAllowPrivateEnv, "1")
 	os.Exit(m.Run())
 }
 
