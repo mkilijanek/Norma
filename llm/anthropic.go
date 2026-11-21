@@ -169,7 +169,7 @@ func (p *anthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 		return Message{}, "", Usage{}, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := readBody(resp.Body, maxResponseBytes)
 	if err != nil {
 		return Message{}, "", Usage{}, err
 	}
