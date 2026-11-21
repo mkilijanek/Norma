@@ -24,3 +24,10 @@ func setDetached(cmd *exec.Cmd) {
 func treeKill(p *os.Process) {
 	_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid)).Run()
 }
+
+// Windows: no ownership/symlink semantics to check here; per-user %TEMP already applies.
+const outputFlags = os.O_CREATE | os.O_EXCL | os.O_WRONLY
+
+func taskBaseName() string { return "norma" }
+
+func secureDir(dir string) error { return os.MkdirAll(dir, 0o700) }

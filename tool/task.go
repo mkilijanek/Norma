@@ -230,7 +230,9 @@ type Manager struct {
 	sessSeq  int
 }
 
-func baseTaskDir() string { return filepath.Join(os.TempDir(), "norma") }
+// baseTaskDir is per-user (norma-<uid>) and created 0700 so another local user
+// cannot pre-create or swap it (see secureDir).
+func baseTaskDir() string { return filepath.Join(os.TempDir(), taskBaseName()) }
 
 // NewManager creates the per-session task directory and garbage-collects stale
 // directories left by previous sessions.
@@ -238,8 +240,14 @@ func NewManager(sessionID string) (*Manager, error) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
+	if filepath.Base(sessionID) != sessionID || sessionID == "." || sessionID == ".." {
+		return nil, fmt.Errorf("invalid session id %q", sessionID)
+	}
+	if err := secureDir(baseTaskDir()); err != nil {
+		return nil, err
+	}
 	dir := filepath.Join(baseTaskDir(), sessionID, "tasks")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	cleanStaleSessions(baseTaskDir(), sessionID)
@@ -334,7 +342,8 @@ func (m *Manager) Spawn(spec SpawnSpec) (*Task, error) {
 	m.mu.Unlock()
 
 	outPath := filepath.Join(m.dir, id+".output")
-	f, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	_ = os.Remove(outPath) // stale file from a reused session id; Remove never follows a symlink
+	f, err := os.OpenFile(outPath, outputFlags, 0o600)
 	if err != nil {
 		return nil, err
 	}
