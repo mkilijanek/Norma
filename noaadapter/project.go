@@ -202,7 +202,7 @@ func Reassemble(cores []noa.CoreMessage, originals []llm.Message, sc *Sidecar, o
 
 	// A range that ended mid-exchange can leave a tool block without its
 	// counterpart; strict providers reject that outright.
-	out = llm.PairToolBlocks(out)
+	out = llm.NormalizeToolExchanges(out)
 	return dropEmpty(out)
 }
 
