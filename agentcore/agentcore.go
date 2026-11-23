@@ -8,9 +8,11 @@ package agentcore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -236,6 +238,21 @@ type Options struct {
 	// env var disables them for every session; this field is the per-session equivalent.
 	DisableBackgroundTasks bool
 
+	// TaskDir, when set, is a host-supplied base directory for this session's
+	// background-task output: files go under <TaskDir>/<SessionID>/tasks instead
+	// of the default per-user $TMPDIR/norma-<uid> (which is forced to 0700). It
+	// must be an absolute path to an existing directory that is not a symlink and
+	// is owned by the current user; the SDK neither creates it nor changes its
+	// mode. Use it when tool processes run as another user and must read task
+	// output. An unusable TaskDir is an error: NewSessionE returns it, and a
+	// session from NewSession reports it on the first Prompt. Empty keeps the
+	// default.
+	TaskDir string
+	// TaskDirMode is the mode of the <SessionID> and <SessionID>/tasks directories
+	// created under TaskDir (applied exactly; zero means 0700). Output files stay
+	// 0600. Setting it without TaskDir is an error.
+	TaskDirMode os.FileMode
+
 	// NonStreaming runs every model call as a single non-streaming request
 	// (Provider.Complete) instead of a token stream. The host still receives the
 	// same event sequence (text/thinking/tool_use/usage), just delivered when the
@@ -289,11 +306,32 @@ type Session struct {
 	store     *transcript.Store
 	writer    *transcript.Writer
 	tasks     *tool.Manager
+	initErr   error           // construction error, reported by Prompt (see NewSession)
 	unlock    *tool.UnlockSet // deferred-tool call gate (nil when no deferred tools)
 }
 
-// NewSession builds a Session, applying defaults.
+// NewSession builds a Session, applying defaults. It cannot return an error, so
+// a host that sets TaskDir should use NewSessionE; with NewSession an unusable
+// TaskDir makes the first Prompt fail with that error.
 func NewSession(opts Options) *Session {
+	s, _ := newSession(opts)
+	return s
+}
+
+// NewSessionE is NewSession for hosts that need construction errors. It returns
+// the error from an unusable Options.TaskDir (or TaskDirMode) and no session.
+func NewSessionE(opts Options) (*Session, error) {
+	s, err := newSession(opts)
+	if err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// newSession always returns a non-nil Session; the error, when set, is also
+// kept in s.initErr so Prompt can report it.
+func newSession(opts Options) (*Session, error) {
 	tools := opts.Tools
 	if tools == nil {
 		tools = tool.DefaultTools()
@@ -359,11 +397,22 @@ func NewSession(opts Options) *Session {
 	// Background task execution: a per-session manager plus the tools that read and
 	// control it. Disabled by the global AGENT_CORE_DISABLE_BACKGROUND_TASKS env var
 	// or by setting Options.DisableBackgroundTasks for this session only.
-	if !tool.BackgroundTasksDisabled() && !opts.DisableBackgroundTasks {
-		if mgr, err := tool.NewManager(s.sessionID); err == nil {
+	if opts.TaskDir == "" && opts.TaskDirMode != 0 {
+		s.initErr = errors.New("agentcore: TaskDirMode is set without TaskDir")
+	}
+	if !tool.BackgroundTasksDisabled() && !opts.DisableBackgroundTasks && s.initErr == nil {
+		mgr, err := tool.NewManagerWithOptions(s.sessionID, tool.ManagerOptions{Dir: opts.TaskDir, DirMode: opts.TaskDirMode})
+		switch {
+		case err == nil:
 			s.tasks = mgr
 			tools = append(tools, tool.NewTaskOutput(), tool.NewTaskStop(), tool.NewTaskList(), tool.NewMonitor())
+		case opts.TaskDir != "":
+			// The host chose this directory: running without background tasks
+			// would silently move Bash output elsewhere, so report it.
+			s.initErr = fmt.Errorf("agentcore: task directory: %w", err)
 		}
+		// With the default directory a failure is unchanged from v0.7.0: the
+		// session runs without a task manager.
 	}
 	s.registry = tool.NewRegistry(tools...)
 	// Deferred tools: withhold their schemas (harness filters by opts.DeferredTools)
@@ -381,7 +430,7 @@ func NewSession(opts Options) *Session {
 		s.store = opts.Transcript
 		s.writer = s.store.NewWriter(s.sessionID, "")
 	}
-	return s
+	return s, s.initErr
 }
 
 // Close releases session resources, killing any background tasks and removing
@@ -487,6 +536,10 @@ type hookFirer interface {
 // final event is KindResult; Session state is updated when the consumer reaches
 // it (FR-07.3).
 func (s *Session) Prompt(ctx context.Context, input string) iter.Seq2[harness.Event, error] {
+	if s.initErr != nil {
+		err := s.initErr
+		return func(yield func(harness.Event, error) bool) { yield(harness.Event{}, err) }
+	}
 	// Auto-inject memories relevant to this prompt (Phase 4).
 	if s.opts.Memory != nil && s.opts.Memory.AutoInject && s.opts.Memory.Store != nil {
 		max := s.opts.Memory.MaxInject

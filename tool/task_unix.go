@@ -54,3 +54,44 @@ func secureDir(dir string) error {
 	}
 	return nil
 }
+
+// checkHostDir verifies a host-supplied base is an existing real directory (not
+// a symlink) owned by this user. It never creates or chmods it.
+func checkHostDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("task dir: %w", err)
+	}
+	return checkOwnedDir(dir, fi)
+}
+
+func checkOwnedDir(dir string, fi os.FileInfo) error {
+	if !fi.IsDir() {
+		return fmt.Errorf("task dir %s is not a directory (symlink?)", dir)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("task dir %s is not owned by the current user", dir)
+	}
+	return nil
+}
+
+// ensureDirMode makes dir (one level, its parent already checked) with exactly
+// mode. An existing dir must be a real directory owned by this user and is
+// brought to mode; a symlink is refused rather than followed.
+func ensureDirMode(dir string, mode os.FileMode) error {
+	if err := os.Mkdir(dir, mode); err != nil && !os.IsExist(err) {
+		return err
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if err := checkOwnedDir(dir, fi); err != nil {
+		return err
+	}
+	if fi.Mode().Perm() != mode {
+		return os.Chmod(dir, mode) // also corrects the umask's effect on Mkdir
+	}
+	return nil
+}

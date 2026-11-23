@@ -11,12 +11,35 @@ import (
 
 // fileArchiver writes archives under <root>/tier<N>/.
 type fileArchiver struct {
-	mu   sync.Mutex
-	root string
+	mu      sync.Mutex
+	root    string
+	dirMode os.FileMode // tier directory mode; 0 means defaultArchiveDirMode
 }
+
+// defaultArchiveDirMode is the tier directory mode when the host sets none.
+const defaultArchiveDirMode os.FileMode = 0o700
 
 // NewFileArchiver returns an Archiver rooted at dir.
 func NewFileArchiver(root string) noa.Archiver { return &fileArchiver{root: root} }
+
+// newFileArchiver is NewFileArchiver with a host-chosen tier directory mode
+// (0 keeps the default, 0700).
+func newFileArchiver(root string, dirMode os.FileMode) noa.Archiver {
+	return &fileArchiver{root: root, dirMode: dirMode}
+}
+
+// validArchiveDirMode checks Options.ArchiveDirMode: permission bits only, and
+// the owner keeps read, write and search so archives can be written and
+// replaced. Zero is valid and means the default.
+func validArchiveDirMode(m os.FileMode) error {
+	if m&^os.ModePerm != 0 {
+		return fmt.Errorf("noaadapter: ArchiveDirMode %v has bits beyond the permission bits", m)
+	}
+	if m != 0 && m&0o700 != 0o700 {
+		return fmt.Errorf("noaadapter: ArchiveDirMode %04o must give the owner read, write and search (0700)", m.Perm())
+	}
+	return nil
+}
 
 // Write persists one archive atomically.
 //
@@ -30,8 +53,19 @@ func (a *fileArchiver) Write(tier noa.Tier, blockID, startRef, endRef string, co
 
 	rel := filepath.Join(noa.ArchiveTierDir(tier), noa.ArchiveFileName(blockID, startRef, endRef))
 	abs := filepath.Join(a.root, rel)
-	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
+	mode := a.dirMode
+	if mode == 0 {
+		mode = defaultArchiveDirMode
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), mode); err != nil {
 		return "", "", fmt.Errorf("create archive dir: %w", err)
+	}
+	if a.dirMode != 0 {
+		// MkdirAll is subject to the umask and leaves an existing directory
+		// alone; a host-chosen mode is applied exactly.
+		if err := os.Chmod(filepath.Dir(abs), a.dirMode); err != nil {
+			return "", "", fmt.Errorf("set archive dir mode: %w", err)
+		}
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(abs), ".noa-*.tmp")
@@ -83,7 +117,12 @@ type reuseArchiver struct {
 
 // NewReuseArchiver returns an Archiver that adopts archives already on disk.
 func NewReuseArchiver(root string) noa.Archiver {
-	return &reuseArchiver{inner: NewFileArchiver(root), root: root}
+	return newReuseArchiver(root, 0)
+}
+
+// newReuseArchiver is NewReuseArchiver with a host-chosen tier directory mode.
+func newReuseArchiver(root string, dirMode os.FileMode) noa.Archiver {
+	return &reuseArchiver{inner: newFileArchiver(root, dirMode), root: root}
 }
 
 func (a *reuseArchiver) Write(tier noa.Tier, blockID, startRef, endRef string, content []byte) (string, string, error) {

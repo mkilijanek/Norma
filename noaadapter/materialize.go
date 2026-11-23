@@ -73,7 +73,7 @@ func RebuildFromHistory(msgs []llm.Message, o Options) (*Session, error) {
 	res := noa.RebuildStateFromLog(noa.RebuildInput{
 		Messages:    cores,
 		Config:      sess.Config(),
-		Archiver:    NewReuseArchiver(sess.ArchiveRoot()),
+		Archiver:    newReuseArchiver(sess.ArchiveRoot(), o.ArchiveDirMode),
 		SessionID:   o.SessionID,
 		ArchiveRoot: sess.ArchiveRoot(),
 		CreatedAt:   now.Format(time.RFC3339),
