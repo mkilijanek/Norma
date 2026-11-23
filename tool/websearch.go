@@ -78,6 +78,13 @@ type WebSearchConfig struct {
 	// clients, so a non-browser value may be rejected by that provider.
 	CustomUserAgent bool
 	UserAgent       string
+	// AllowPrivate disables the default SSRF guard for the "deepseek" backend
+	// only, so its endpoint may be a loopback or private address (see
+	// WebFetchConfig.AllowPrivate for the guard's scope). Other backends ignore
+	// it and keep the guard: their endpoints are fixed public hosts. The
+	// NORMA_WEBFETCH_ALLOW_PRIVATE variable still applies to every backend.
+	// Redirects stay refused either way. Default false.
+	AllowPrivate bool
 }
 
 // NewWebSearch builds the web_search tool for the configured backend. It returns
@@ -123,6 +130,9 @@ func newSearchProvider(cfg WebSearchConfig) (searchProvider, error) {
 		backend = "ddgs"
 	}
 	fetchCfg := WebFetchConfig{Proxy: cfg.Proxy, CACert: cfg.CACert, InsecureTLS: cfg.InsecureTLS, CustomUserAgent: cfg.CustomUserAgent, UserAgent: cfg.UserAgent}
+	// Only the DeepSeek-format backend, whose endpoint is host-configured, may
+	// lift the SSRF guard; the other backends call fixed public hosts.
+	fetchCfg.AllowPrivate = cfg.AllowPrivate && backend == "deepseek"
 	if err := validateFetchConfig(fetchCfg); err != nil {
 		return nil, fmt.Errorf("web_search: %w", err)
 	}
