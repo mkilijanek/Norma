@@ -324,7 +324,7 @@ func dropEmpty(msgs []llm.Message) []llm.Message {
 		if m.Role == llm.RoleAssistant && m.Text() == "" && len(m.ToolUses()) == 0 {
 			hasThinking := false
 			for _, b := range m.Content {
-				if b.Type == llm.BlockThinking {
+				if b.Type == llm.BlockThinking || b.Type == llm.BlockRedactedThinking {
 					hasThinking = true
 					break
 				}
