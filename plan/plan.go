@@ -20,6 +20,12 @@ import (
 // optional feedback for the agent to revise against.
 type Approver func(ctx context.Context, plan string) (approved bool, feedback string)
 
+// AutoApprove is an Approver that approves every plan. It is an explicit opt-in
+// for unattended automation: with it, anything the model reads while "read-only"
+// (including prompt-injected text) can end plan mode just by calling
+// ExitPlanMode. A nil Approver does NOT auto-approve; ExitPlanMode then refuses.
+func AutoApprove(context.Context, string) (bool, string) { return true, "" }
+
 // Controller tracks the live permission mode for a planning session.
 type Controller struct {
 	mu      sync.Mutex
@@ -124,11 +130,13 @@ func ExitTool(c *Controller, approve Approver) tool.CoreTool {
 			if !c.InPlan() {
 				return tool.Text("Not currently in plan mode; proceeding with implementation."), nil
 			}
-			approved := true
-			feedback := ""
-			if approve != nil {
-				approved, feedback = approve(ctx, in.Plan)
+			// Fail closed: with no approver nobody can approve, so the model must
+			// not be able to lift its own read-only restriction. Hosts that want
+			// unattended exit pass AutoApprove explicitly.
+			if approve == nil {
+				return tool.Errorf("ExitPlanMode is unavailable: no plan approver is configured, so plan mode cannot be exited. Stay in plan mode and present the plan to the user as your final answer."), nil
 			}
+			approved, feedback := approve(ctx, in.Plan)
 			if approved {
 				c.approve()
 				return tool.Text("The user approved the plan. Plan mode is now exited — implement the approved plan:\n\n" + in.Plan), nil

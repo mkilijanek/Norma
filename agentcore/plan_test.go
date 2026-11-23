@@ -90,3 +90,23 @@ func toolTurn(id, name, input string) []llm.StreamEvent {
 		{Type: llm.SEMessageStop},
 	}
 }
+
+// A nil Approver no longer auto-approves; AutoApprove restores that explicitly.
+func TestPlanNilApproverNeedsExplicitAutoApprove(t *testing.T) {
+	for _, auto := range []bool{false, true} {
+		s := NewSession(Options{
+			PermissionMode: permission.ModeDefault,
+			WorkingDir:     t.TempDir(),
+			Plan:           &PlanOptions{StartInPlanMode: true, AutoApprove: auto},
+			Deps:           harness.QueryDeps{},
+		})
+		exit, ok := s.registry.Get("ExitPlanMode")
+		if !ok {
+			t.Fatal("ExitPlanMode not registered")
+		}
+		res, _ := exit.Call(context.Background(), []byte(`{"plan":"x"}`), &tool.ToolContext{})
+		if auto == res.IsError {
+			t.Fatalf("AutoApprove=%v: IsError=%v (%q)", auto, res.IsError, res.Flatten())
+		}
+	}
+}
