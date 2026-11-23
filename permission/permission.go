@@ -47,7 +47,7 @@ type Mode string
 
 const (
 	ModeDefault     Mode = "default"           // ask for non-read-only unless a rule allows
-	ModeAcceptEdits Mode = "acceptEdits"       // auto-allow file edits/writes
+	ModeAcceptEdits Mode = "acceptEdits"       // auto-allow file edits/writes inside the working directory (not .git)
 	ModeBypass      Mode = "bypassPermissions" // allow everything (except deny rules)
 	ModePlan        Mode = "plan"              // read-only only
 	ModeDontAsk     Mode = "dontAsk"           // never prompt; rules + read-only only
@@ -108,7 +108,7 @@ func Evaluate(ctx context.Context, req Request) Decision {
 	if matchRule(req.Ctx.Allowed, req.ToolName, false) {
 		return Allowed()
 	}
-	if req.Ctx.Mode == ModeAcceptEdits && editTools[req.ToolName] {
+	if req.Ctx.Mode == ModeAcceptEdits && editTools[req.ToolName] && editPathAllowed(req.Input, req.Ctx.WorkingDir) {
 		return Allowed()
 	}
 	if req.IsReadOnly {
