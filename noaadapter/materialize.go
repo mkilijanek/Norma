@@ -49,7 +49,7 @@ func Materialize(msgs []llm.Message, o Options) ([]llm.Message, error) {
 
 	// No ref tags: they address a scheme that is no longer running, and would
 	// only invite the model to use ids nothing will resolve.
-	return Reassemble(pruned, msgs, sc, ReassembleOptions{Tag: false}), nil
+	return Reassemble(pruned, msgs, sc, ReassembleOptions{Tag: false, State: &state}), nil
 }
 
 // RebuildFromHistory reconstructs compression state by replaying the Compress
