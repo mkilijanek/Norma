@@ -242,8 +242,14 @@ type Options struct {
 
 // PlanOptions configures plan mode.
 type PlanOptions struct {
-	// Approver decides whether a presented plan is accepted. Nil auto-approves.
+	// Approver decides whether a presented plan is accepted. Nil does NOT
+	// auto-approve: ExitPlanMode then refuses and the session stays in plan mode
+	// (set AutoApprove for the old unattended behaviour).
 	Approver plan.Approver
+	// AutoApprove, when true and Approver is nil, approves every plan
+	// (plan.AutoApprove). Opt-in only: it lets the model, including via prompt
+	// injection, leave read-only plan mode on its own.
+	AutoApprove bool
 	// StartInPlanMode begins the session read-only (the agent must ExitPlanMode
 	// to implement). If false, the agent enters plan mode itself via EnterPlanMode.
 	StartInPlanMode bool
@@ -309,7 +315,11 @@ func NewSession(opts Options) *Session {
 			start = permission.ModePlan
 		}
 		s.planCtrl = plan.NewController(start, opts.Plan.TargetMode)
-		tools = append(tools, plan.Tools(s.planCtrl, opts.Plan.Approver)...)
+		approver := opts.Plan.Approver
+		if approver == nil && opts.Plan.AutoApprove {
+			approver = plan.AutoApprove
+		}
+		tools = append(tools, plan.Tools(s.planCtrl, approver)...)
 	}
 	if opts.Memory != nil && opts.Memory.Store != nil {
 		tools = append(tools, memory.Tools(opts.Memory.Store)...)

@@ -47,3 +47,25 @@ func TestExitToolReject(t *testing.T) {
 		t.Fatalf("should stay in plan, mode=%v", c.Mode())
 	}
 }
+
+// With no approver the model must not be able to leave plan mode on its own.
+func TestExitToolNilApproverFailsClosed(t *testing.T) {
+	c := NewController(permission.ModeDontAsk, permission.ModeAcceptEdits)
+	c.Enter()
+	exit := ExitTool(c, nil)
+	res, _ := exit.Call(context.Background(), []byte(`{"plan":"x"}`), &tool.ToolContext{})
+	if !res.IsError || !strings.Contains(res.Flatten(), "no plan approver") {
+		t.Fatalf("nil approver must refuse: %q", res.Flatten())
+	}
+	if c.Mode() != permission.ModePlan {
+		t.Fatalf("must stay in plan mode, got %v", c.Mode())
+	}
+}
+
+func TestAutoApproveIsExplicitOptIn(t *testing.T) {
+	c := NewController(permission.ModePlan, permission.ModeAcceptEdits)
+	res, _ := ExitTool(c, AutoApprove).Call(context.Background(), []byte(`{"plan":"x"}`), &tool.ToolContext{})
+	if res.IsError || c.Mode() != permission.ModeAcceptEdits {
+		t.Fatalf("AutoApprove should exit: %q mode=%v", res.Flatten(), c.Mode())
+	}
+}
