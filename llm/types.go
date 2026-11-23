@@ -211,11 +211,15 @@ type CompletionRequest struct {
 	// from per-request dynamic content; providers may set a cache breakpoint
 	// there (FR-02.2). 0 disables.
 	DynamicBoundary int
-	Messages        []Message
-	Tools           []ToolSchema
-	MaxTokens       int
-	Temperature     *float64
-	Stop            []string
+	// CacheBreakpoints optionally marks additional prefix endpoints before
+	// DynamicBoundary. Anthropic supports up to four total endpoints; other
+	// adapters ignore this transport hint. Empty retains legacy serialization.
+	CacheBreakpoints []int `json:"CacheBreakpoints,omitempty"`
+	Messages         []Message
+	Tools            []ToolSchema
+	MaxTokens        int
+	Temperature      *float64
+	Stop             []string
 	// Thinking overrides the provider's thinking mode for THIS request only:
 	// "" inherits Config.ThinkingType; "enabled"/"disabled" force that mode.
 	// Compaction's summary call sets "disabled" so the summarizer never spends

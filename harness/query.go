@@ -16,10 +16,11 @@ import (
 
 // QueryInput is a fully-resolved request to run the loop.
 type QueryInput struct {
-	Provider        llm.Provider
-	System          []string
-	DynamicBoundary int
-	Messages        []llm.Message // conversation including the latest user turn
+	Provider         llm.Provider
+	System           []string
+	DynamicBoundary  int
+	CacheBreakpoints []int
+	Messages         []llm.Message // conversation including the latest user turn
 	// SystemReminder, when non-empty, is prepended as the first message on each
 	// model call. It is not stored in conversation history — the host builds it
 	// fresh per Prompt call so it never accumulates across turns.
@@ -801,12 +802,13 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 		msgs = append([]llm.Message{llm.UserText(l.in.SystemReminder)}, msgs...)
 	}
 	req := llm.CompletionRequest{
-		System:          l.in.System,
-		DynamicBoundary: l.in.DynamicBoundary,
-		Messages:        msgs,
-		Tools:           schemas,
-		MaxTokens:       l.maxTokens(),
-		Temperature:     l.in.Temperature,
+		System:           l.in.System,
+		DynamicBoundary:  l.in.DynamicBoundary,
+		CacheBreakpoints: append([]int(nil), l.in.CacheBreakpoints...),
+		Messages:         msgs,
+		Tools:            schemas,
+		MaxTokens:        l.maxTokens(),
+		Temperature:      l.in.Temperature,
 	}
 	if l.in.NonStreaming {
 		return l.completeAndExecute(req)

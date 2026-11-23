@@ -37,6 +37,9 @@ type Options struct {
 	SystemPrompt       []string
 	AppendSystemPrompt []string
 	DynamicBoundary    int
+	// SystemCacheBreakpoints adds earlier system-prefix endpoints without
+	// changing DynamicBoundary or the ordering of any system instructions.
+	SystemCacheBreakpoints []int
 
 	// Tools the agent may call. Defaults to tool.DefaultTools().
 	Tools []tool.CoreTool
@@ -536,6 +539,7 @@ func (s *Session) Prompt(ctx context.Context, input string) iter.Seq2[harness.Ev
 		Provider:                s.opts.Provider,
 		System:                  s.system(),
 		DynamicBoundary:         s.opts.DynamicBoundary,
+		CacheBreakpoints:        append([]int(nil), s.opts.SystemCacheBreakpoints...),
 		Messages:                s.messages,
 		SystemReminder:          buildSystemReminder(reminderExtra),
 		Tools:                   s.registry,
