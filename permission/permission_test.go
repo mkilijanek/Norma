@@ -3,6 +3,8 @@ package permission
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -30,8 +32,10 @@ func TestPlanModeDeniesWrites(t *testing.T) {
 }
 
 func TestAcceptEditsAllowsEdit(t *testing.T) {
-	if b := eval(Request{ToolName: "Edit", Ctx: Context{Mode: ModeAcceptEdits}}); b != Allow {
-		t.Fatalf("acceptEdits should allow Edit, got %v", b)
+	wd := t.TempDir()
+	req := Request{ToolName: "Edit", Input: json.RawMessage(`{"file_path":"a/b.go"}`), Ctx: Context{Mode: ModeAcceptEdits, WorkingDir: wd}}
+	if b := eval(req); b != Allow {
+		t.Fatalf("acceptEdits should allow Edit inside the working dir, got %v", b)
 	}
 }
 
@@ -76,5 +80,36 @@ func TestScopedAllowRuleDoesNotAutoAllow(t *testing.T) {
 func TestScopedDenyRuleDeniesTool(t *testing.T) {
 	if b := eval(Request{ToolName: "Bash", Ctx: Context{Mode: ModeBypass, Disallowed: []string{"Bash(rm:*)"}}}); b != Deny {
 		t.Fatalf("scoped deny rule should deny, got %v", b)
+	}
+}
+
+// acceptEdits auto-allows edits only inside the working directory; everything
+// else falls through to the approval flow (here: no handler => deny).
+func TestAcceptEditsConfinedToWorkingDir(t *testing.T) {
+	wd := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(wd, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{
+		`{"file_path":"src/x.go"}`:                          true,
+		`{"file_path":"` + wd + `/src/x.go"}`:               true,
+		`{"notebook_path":"n.ipynb"}`:                       true,
+		`{"file_path":"../x"}`:                              false,
+		`{"file_path":"/etc/cron.d/x"}`:                     false,
+		`{"file_path":"` + outside + `/x"}`:                 false,
+		`{"file_path":"escape/x"}`:                          false, // symlink out
+		`{"file_path":"escape/new/dir/x"}`:                  false,
+		`{"file_path":".git/hooks/pre-commit"}`:             false,
+		`{"file_path":"sub/.git/config"}`:                   false,
+		`{"file_path":"` + os.Getenv("HOME") + `/.bashrc"}`: false,
+		`{}`:       false,
+		`not json`: false,
+	}
+	for in, want := range cases {
+		b := eval(Request{ToolName: "Write", Input: json.RawMessage(in), Ctx: Context{Mode: ModeAcceptEdits, WorkingDir: wd}})
+		if (b == Allow) != want {
+			t.Errorf("%s: got %v, want allow=%v", in, b, want)
+		}
 	}
 }

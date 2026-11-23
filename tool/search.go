@@ -380,7 +380,7 @@ type grepHit struct {
 }
 
 func scanFile(path, base string, re *regexp.Regexp, mode string, showLines, multiline bool, before, after int) *grepHit {
-	data, err := os.ReadFile(path)
+	data, err := readRegularFile(path) // skips FIFOs/devices and oversized files instead of hanging or exhausting memory
 	if err != nil || isBinary(data) {
 		return nil
 	}
