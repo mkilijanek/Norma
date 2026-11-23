@@ -130,6 +130,8 @@ func newSearchProvider(cfg WebSearchConfig) (searchProvider, error) {
 	if cfg.CustomUserAgent {
 		client = withUserAgent(client, cfg.UserAgent)
 	}
+	// Search credentials and POST bodies must never cross a redirect boundary.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	switch backend {
 	case "ddgs":
 		return &ddgsProvider{client: client, endpoint: ddgsEndpoint}, nil
