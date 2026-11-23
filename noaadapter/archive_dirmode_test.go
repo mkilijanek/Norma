@@ -110,3 +110,30 @@ func TestArchiveDirModeValidation(t *testing.T) {
 		})
 	}
 }
+
+// A tier directory replaced by a symlink is refused when a host mode is set,
+// and the symlink target is not chmod-ed.
+func TestArchiveTierDirModeRefusesSymlink(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "s")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, noa.ArchiveTierDir(1))); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := newSession(Options{ArchiveBaseDir: base, SessionID: "s", ArchiveDirMode: 0o711})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sess.archiver.Write(1, "b1", "m00001", "m00002", []byte("body")); err == nil {
+		t.Fatal("write through a symlinked tier dir succeeded, want refusal")
+	}
+	if got := dirModeOf(t, target); got != 0o700 {
+		t.Fatalf("symlink target mode = %v, want 0700 (untouched)", got)
+	}
+}

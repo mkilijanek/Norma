@@ -63,7 +63,7 @@ func (a *fileArchiver) Write(tier noa.Tier, blockID, startRef, endRef string, co
 	if a.dirMode != 0 {
 		// MkdirAll is subject to the umask and leaves an existing directory
 		// alone; a host-chosen mode is applied exactly.
-		if err := os.Chmod(filepath.Dir(abs), a.dirMode); err != nil {
+		if err := chmodDirNoFollow(filepath.Dir(abs), a.dirMode); err != nil {
 			return "", "", fmt.Errorf("set archive dir mode: %w", err)
 		}
 	}

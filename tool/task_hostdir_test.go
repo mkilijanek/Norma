@@ -281,3 +281,39 @@ func TestHostTaskDirRejectsPathSessionID(t *testing.T) {
 		t.Fatal("a session id with a path separator must be refused")
 	}
 }
+
+// A base writable by group or others without the sticky bit lets another user
+// swap the session directory for a symlink, so it is refused.
+func TestHostTaskDirRejectsWritableBase(t *testing.T) {
+	for _, mode := range []os.FileMode{0o777, 0o770, 0o707, 0o722} {
+		base := hostBase(t, mode)
+		_, err := NewManagerWithOptions("writable-base", ManagerOptions{Dir: base})
+		if err == nil {
+			t.Fatalf("mode %v: base accepted, want refusal", mode)
+		}
+		if !strings.Contains(err.Error(), "writable") {
+			t.Fatalf("mode %v: error %q does not explain the refusal", mode, err)
+		}
+	}
+}
+
+// With the sticky bit only the owner can rename or remove entries, so a
+// shared base (like /tmp) is accepted.
+func TestHostTaskDirAcceptsStickyWritableBase(t *testing.T) {
+	base := hostBase(t, 0o777|os.ModeSticky)
+	m, err := NewManagerWithOptions("sticky-base", ManagerOptions{Dir: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Cleanup()
+}
+
+// Group/other access without write permission is fine.
+func TestHostTaskDirAcceptsNonWritableBase(t *testing.T) {
+	base := hostBase(t, 0o711)
+	m, err := NewManagerWithOptions("711-base", ManagerOptions{Dir: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Cleanup()
+}
