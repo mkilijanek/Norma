@@ -245,12 +245,13 @@ type loop struct {
 	yield   func(Event, error) bool
 	sem     chan struct{} // bounds concurrent tool execution
 
-	messages        []llm.Message
-	usage           llm.Usage
-	lastInputTokens int // total token size the previous model response reported (compaction gate)
-	turnCount       int
-	boundaryCount   int       // boundary markers already seen, so Recorder fires once each
-	startTime       time.Time // loop start, for MaxDuration (wall-clock budget)
+	messages              []llm.Message
+	usage                 llm.Usage
+	lastInputTokens       int // total token size the previous model response reported (compaction gate)
+	lastCallContextTokens int // optional physical footprint, separate from retry billing
+	turnCount             int
+	boundaryCount         int       // boundary markers already seen, so Recorder fires once each
+	startTime             time.Time // loop start, for MaxDuration (wall-clock budget)
 
 	// settlement (wrap-up) phase state, entered when a budget is hit
 	settling     bool
@@ -452,6 +453,9 @@ func (l *loop) run() {
 		// The size the model just reported for its input, preferred by the
 		// compactor over local estimation on the next turn's gate check.
 		l.lastInputTokens = turnUsage.InputTokens + turnUsage.OutputTokens
+		if l.lastCallContextTokens > 0 {
+			l.lastInputTokens = l.lastCallContextTokens
+		}
 		l.record(asst, turnUsage)
 		// surface cumulative usage after each model turn so hosts can show live token
 		// counts during a run (not just at the terminal event).
@@ -872,6 +876,7 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 		return asst, exec, "", nil, true, false
 	}
 	l.usage.Add(acc.Usage)
+	l.lastCallContextTokens = acc.Usage.ContextTokens
 	asst = acc.Message()
 	stopReason = acc.StopReason
 	if err != nil {
@@ -895,10 +900,13 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 func (l *loop) completeAndExecute(req llm.CompletionRequest) (asst llm.Message, exec *streamExec, stopReason string, err error, consumerStopped, aborted bool) {
 	exec = newStreamExec(l)
 	msg, sr, usage, cerr := l.deps.CallModelSync(l.ctx, req)
+	// Failed atomic calls may still report billed usage. Retain it before
+	// surfacing the error, just like the streaming accumulator does.
+	l.usage.Add(usage)
+	l.lastCallContextTokens = usage.ContextTokens
 	if cerr != nil {
 		return asst, exec, "", cerr, false, false
 	}
-	l.usage.Add(usage)
 	asst = msg
 	stopReason = sr
 	for _, b := range msg.Content {
