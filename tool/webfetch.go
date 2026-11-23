@@ -40,6 +40,13 @@ type WebFetchConfig struct {
 	// environment proxy is in use (the proxy resolves the destination) or when
 	// the host supplies its own DialContext.
 	AllowPrivate bool
+	// CustomUserAgent, when true, makes WebFetch send UserAgent instead of the
+	// built-in "norma/0.4" on every request, including the direct retry. Default
+	// false: behaviour is unchanged and no new User-Agent is introduced. When
+	// true, UserAgent must be non-empty, at most 256 bytes, and free of control
+	// characters (no CR, LF, NUL), or the config is rejected.
+	CustomUserAgent bool
+	UserAgent       string
 	// CheckRedirect, when set, is installed as the http.Client CheckRedirect of
 	// both the primary client and the direct (no-proxy) retry client, so it sees
 	// every redirect hop on either path. Returning an error stops the redirect and
@@ -106,6 +113,9 @@ const maxFetchBytes = 2 << 20 // 2 MiB
 // explicitly. The CA file is only checked when it will actually be used
 // (InsecureTLS takes precedence over CACert in newFetchClient).
 func validateFetchConfig(cfg WebFetchConfig) error {
+	if err := validateUserAgent(cfg.CustomUserAgent, cfg.UserAgent); err != nil {
+		return err
+	}
 	if cfg.Proxy != "" {
 		pu, err := url.Parse(cfg.Proxy)
 		if err != nil {
@@ -272,6 +282,7 @@ func webFetchRunner(cfg WebFetchConfig) func(context.Context, json.RawMessage, *
 	// otherwise-reachable URL. nil when no proxy is configured (nothing to bypass)
 	// or when DisableDirectRetry is set.
 	direct := newDirectClient(cfg)
+	ua := fetchUserAgent(cfg)
 	return func(ctx context.Context, input json.RawMessage, _ *ToolContext) (Result, error) {
 		var in struct {
 			URL     string `json:"url"`
@@ -292,14 +303,14 @@ func webFetchRunner(cfg WebFetchConfig) func(context.Context, json.RawMessage, *
 		if err != nil {
 			return Errorf("Error: " + err.Error()), nil
 		}
-		req.Header.Set("user-agent", "norma/0.4")
+		req.Header.Set("user-agent", ua)
 		resp, err := client.Do(req)
 		// One direct retry when the proxied attempt failed for a proxy-caused reason.
 		// A non-proxy error (bad host, caller timeout/cancel) is returned as-is — a
 		// direct retry wouldn't fix it. The direct response is NOT captured by the proxy.
 		if err != nil && direct != nil && proxyLikelyErr(err) {
 			if r2, e2 := http.NewRequestWithContext(cctx, http.MethodGet, in.URL, nil); e2 == nil {
-				r2.Header.Set("user-agent", "norma/0.4")
+				r2.Header.Set("user-agent", ua)
 				if resp2, err2 := direct.Do(r2); err2 == nil {
 					resp, err = resp2, nil
 				} else {

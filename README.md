@@ -109,3 +109,13 @@ Task output lives under `$TMPDIR/norma-<uid>/<session>/tasks/`. The per-user bas
 is created `0700`, must be a real directory owned by the current user (symlinks
 and foreign owners are rejected), and output files are created
 `O_EXCL|O_NOFOLLOW`.
+
+## Custom User-Agent (opt-in)
+
+WebFetch sends `norma/0.4` and the ddgs search backend a browser-like string.
+To change that, set `CustomUserAgent: true` and `UserAgent: "..."` on
+`WebFetchConfig` / `WebSearchConfig`. With `CustomUserAgent` false (the default)
+nothing changes and no new User-Agent is introduced. The value must be
+non-empty, at most 256 bytes and free of control characters, or the tool is
+rejected as misconfigured. The ddgs endpoint blocks obviously automated clients,
+so a non-browser value may be refused by it.

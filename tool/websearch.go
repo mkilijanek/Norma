@@ -71,6 +71,13 @@ type WebSearchConfig struct {
 	// Prefer CACert. See WebFetchConfig for the full semantics.
 	CACert      string
 	InsecureTLS bool
+	// CustomUserAgent, when true, makes every search request send UserAgent
+	// (overriding the ddgs browser-like default). Default false: behaviour is
+	// unchanged. UserAgent must then be non-empty, at most 256 bytes and free of
+	// control characters. Note the ddgs endpoint blocks obviously automated
+	// clients, so a non-browser value may be rejected by that provider.
+	CustomUserAgent bool
+	UserAgent       string
 }
 
 // NewWebSearch builds the web_search tool for the configured backend. It returns
@@ -115,11 +122,14 @@ func newSearchProvider(cfg WebSearchConfig) (searchProvider, error) {
 	if backend == "" {
 		backend = "ddgs"
 	}
-	fetchCfg := WebFetchConfig{Proxy: cfg.Proxy, CACert: cfg.CACert, InsecureTLS: cfg.InsecureTLS}
+	fetchCfg := WebFetchConfig{Proxy: cfg.Proxy, CACert: cfg.CACert, InsecureTLS: cfg.InsecureTLS, CustomUserAgent: cfg.CustomUserAgent, UserAgent: cfg.UserAgent}
 	if err := validateFetchConfig(fetchCfg); err != nil {
 		return nil, fmt.Errorf("web_search: %w", err)
 	}
 	client := newFetchClient(fetchCfg)
+	if cfg.CustomUserAgent {
+		client = withUserAgent(client, cfg.UserAgent)
+	}
 	switch backend {
 	case "ddgs":
 		return &ddgsProvider{client: client, endpoint: ddgsEndpoint}, nil
