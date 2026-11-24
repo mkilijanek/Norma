@@ -356,6 +356,11 @@ func cleanStaleSessions(base, current string) {
 			continue
 		}
 		dir := filepath.Join(base, e.Name())
+		// A host-supplied base may hold unrelated directories: only remove what
+		// is shaped like a session directory this user created.
+		if !isOwnSessionDir(dir) {
+			continue
+		}
 		if newestMTime(dir).Before(cutoff) {
 			_ = os.RemoveAll(dir)
 		}

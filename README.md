@@ -170,6 +170,10 @@ lift the network guard for every backend.
 - Assistant messages that contain only redacted thinking blocks are kept in the
   history instead of being dropped.
 
+## API key for the CLI
+
+Prefer the `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` environment variable. `-api-key-file PATH` (chmod 600) and `-api-key-stdin` (with `-p`) keep the key out of the process list and shell history. `-api-key KEY` still works but prints a warning, because arguments are visible to every local user through `ps` and `/proc/<pid>/cmdline`. Only one source may be given.
+
 ## Read confinement
 
 `Read`, `Grep` and `Glob` are read-only, but that does not make every path safe to hand to a model. Two guards apply to them:

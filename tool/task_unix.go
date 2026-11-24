@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 )
 
@@ -112,4 +113,17 @@ func ensureDirMode(dir string, mode os.FileMode) error {
 		return syscall.Fchmod(fd, uint32(mode)) // also corrects the umask's effect on Mkdir
 	}
 	return nil
+}
+
+// isOwnSessionDir reports whether dir looks like a session directory this user
+// created: a real directory owned by the current uid with a real "tasks"
+// directory inside. cleanStaleSessions removes only such directories, so a
+// host-supplied base holding other data is never swept.
+func isOwnSessionDir(dir string) bool {
+	fi, err := os.Lstat(dir)
+	if err != nil || checkOwnedDir(dir, fi) != nil {
+		return false
+	}
+	ti, err := os.Lstat(filepath.Join(dir, "tasks"))
+	return err == nil && ti.IsDir()
 }

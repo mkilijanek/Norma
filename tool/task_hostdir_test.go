@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // hostBase returns a fresh base directory with the given mode, the way a host
@@ -316,4 +317,47 @@ func TestHostTaskDirAcceptsNonWritableBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer m.Cleanup()
+}
+
+// A host-supplied base may hold unrelated directories; the stale-session sweep
+// must leave anything that is not shaped like a session directory alone, while
+// still removing a genuinely stale one.
+func TestHostDirSweepSparesUnrelatedDirs(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Chmod(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-100 * 24 * time.Hour)
+	age := func(paths ...string) {
+		for _, p := range paths {
+			if err := os.Chtimes(p, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	unrelated := filepath.Join(base, "important-data")
+	if err := os.MkdirAll(unrelated, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(unrelated, "f")
+	os.WriteFile(f, []byte("x"), 0o600)
+	age(f, unrelated)
+
+	stale := filepath.Join(base, "dead-session")
+	if err := os.MkdirAll(filepath.Join(stale, "tasks"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	age(filepath.Join(stale, "tasks"), stale)
+
+	m, err := NewManagerWithOptions("live", ManagerOptions{Dir: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Cleanup()
+	if _, err := os.Stat(f); err != nil {
+		t.Errorf("unrelated directory was swept: %v", err)
+	}
+	if _, err := os.Stat(stale); err == nil {
+		t.Error("stale session directory should still be removed")
+	}
 }

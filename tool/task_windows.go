@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 )
@@ -52,4 +53,15 @@ func ensureDirMode(dir string, mode os.FileMode) error {
 		return err
 	}
 	return checkHostDir(dir)
+}
+
+// isOwnSessionDir reports whether dir looks like a session directory: a real
+// directory with a real "tasks" directory inside (no ownership check on Windows).
+func isOwnSessionDir(dir string) bool {
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() {
+		return false
+	}
+	ti, err := os.Lstat(filepath.Join(dir, "tasks"))
+	return err == nil && ti.IsDir()
 }

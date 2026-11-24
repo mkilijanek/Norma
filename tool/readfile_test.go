@@ -51,6 +51,10 @@ func TestReadRegularFileSizeCap(t *testing.T) {
 }
 
 func TestGrepSkipsFIFOInTree(t *testing.T) {
+	// Exercise the Go fallback deterministically. Without this the first Grep
+	// call resolves ripgrep, which on a runner without rg runs `npm install -g`
+	// and can exceed the 5s hang detector below.
+	t.Setenv("NORMA_DISABLE_RIPGREP", "1")
 	dir := t.TempDir()
 	if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600); err != nil {
 		t.Skip(err)
