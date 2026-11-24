@@ -110,6 +110,15 @@ is created `0700`, must be a real directory owned by the current user (symlinks
 and foreign owners are rejected), and output files are created
 `O_EXCL|O_NOFOLLOW`.
 
+## Read confinement
+
+`Read`, `Grep` and `Glob` are read-only, but that does not make every path safe to hand to a model. Two guards apply to them:
+
+- **Credential stores always need approval** (default on): `/proc/*/environ`, `/proc/*/mem`, `/etc/shadow`, `/etc/sudoers*`, anything under `.ssh`, `.aws`, `.gnupg`, `.kube`, `.azure`, `.config/gcloud`, `.docker/config.json`, and files named `.netrc`, `.git-credentials`, `.npmrc`, `.pypirc`, `.pgpass`, `.env`, `.env.*` (except `.example`, `.sample`, `.template`, `.dist`). Symlinks are resolved first. In plan mode and `dontAsk` these are denied; an explicit bare `Read` allow rule or bypass mode still wins.
+- **`ConfineReads` (opt-in, default false)**: set `agentcore.Options.ConfineReads` (also `harness.Input`, `subagent.Config`, `coordinator.Config`) to require approval for any path outside the working directory.
+
+A `Grep`/`Glob` rooted at a directory that merely contains a credential store (for example `$HOME`) is not detected; use `ConfineReads` to keep searches inside the project.
+
 ## Custom User-Agent (opt-in)
 
 WebFetch sends `norma/0.4` and the ddgs search backend a browser-like string.

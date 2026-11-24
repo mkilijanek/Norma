@@ -60,6 +60,10 @@ type Context struct {
 	WorkingDir string
 	Allowed    []string
 	Disallowed []string
+	// ConfineReads makes Read, Grep and Glob ask for approval when their target
+	// lies outside the working directory. Credential stores (~/.ssh, ~/.aws,
+	// /proc/*/environ, .env files, ...) need approval regardless of this flag.
+	ConfineReads bool
 }
 
 // CanUseTool is the host's interactive approval callback (CLI prompt, GUI, or
@@ -101,6 +105,9 @@ func Evaluate(ctx context.Context, req Request) Decision {
 		if !req.IsReadOnly {
 			return Denied("denied: plan mode permits read-only tools only")
 		}
+		if readNeedsApproval(req.ToolName, req.Input, req.Ctx.WorkingDir, req.Ctx.ConfineReads) {
+			return Denied("denied: plan mode does not allow reading sensitive or out-of-tree paths")
+		}
 		return Allowed()
 	}
 
@@ -111,10 +118,13 @@ func Evaluate(ctx context.Context, req Request) Decision {
 	if req.Ctx.Mode == ModeAcceptEdits && editTools[req.ToolName] && editPathAllowed(req.Input, req.Ctx.WorkingDir) {
 		return Allowed()
 	}
-	if req.IsReadOnly {
+	// A read of a credential store (or, when confined, anything outside the
+	// working directory) is not auto-allowed: it falls through to approval.
+	guarded := req.IsReadOnly && readNeedsApproval(req.ToolName, req.Input, req.Ctx.WorkingDir, req.Ctx.ConfineReads)
+	if req.IsReadOnly && !guarded {
 		return Allowed()
 	}
-	if req.ToolDecision.Behavior == Allow {
+	if !guarded && req.ToolDecision.Behavior == Allow {
 		return req.ToolDecision
 	}
 
