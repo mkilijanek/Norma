@@ -31,7 +31,9 @@ func main() {
 		providerName = flag.String("provider", env("AGENT_PROVIDER", "anthropic"), "anthropic | openai")
 		model        = flag.String("model", env("AGENT_MODEL", ""), "model id (e.g. claude-opus-4-8, gpt-4o)")
 		baseURL      = flag.String("base-url", "", "override API base URL")
-		apiKey       = flag.String("api-key", "", "API key (else ANTHROPIC_API_KEY / OPENAI_API_KEY)")
+		apiKey       = flag.String("api-key", "", "API key (insecure: visible in ps; prefer the env var, -api-key-file or -api-key-stdin)")
+		apiKeyFile   = flag.String("api-key-file", "", "read the API key from this file (chmod 600)")
+		apiKeyStdin  = flag.Bool("api-key-stdin", false, "read the API key from stdin (use with -p)")
 		systemFile   = flag.String("system", "", "path to a system prompt file (else a built-in coding prompt)")
 		workDir      = flag.String("dir", "", "working directory for tools (default cwd)")
 		yes          = flag.Bool("yes", false, "auto-approve all tool calls (bypass permission)")
@@ -40,6 +42,15 @@ func main() {
 	)
 	flag.Parse()
 
+	if *apiKeyStdin && *oneShot == "" {
+		fmt.Fprintln(os.Stderr, "error: -api-key-stdin needs -p (interactive mode reads prompts from stdin)")
+		os.Exit(2)
+	}
+	key, err := resolveAPIKey(*apiKey, *apiKeyFile, *apiKeyStdin, os.Stdin, os.Stderr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(2)
+	}
 	if *model == "" {
 		fmt.Fprintln(os.Stderr, "error: -model is required")
 		os.Exit(2)
@@ -61,7 +72,7 @@ func main() {
 	prov, err := llm.NewProvider(llm.Config{
 		Format:  llm.Format(strings.ToLower(*providerName)),
 		BaseURL: *baseURL,
-		APIKey:  *apiKey,
+		APIKey:  key,
 		Model:   *model,
 	})
 	if err != nil {
