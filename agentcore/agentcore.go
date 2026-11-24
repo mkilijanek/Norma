@@ -57,7 +57,10 @@ type Options struct {
 	CanUseTool      permission.CanUseTool
 	AllowedTools    []string
 	DisallowedTools []string
-	PermissionMode  permission.Mode
+	// ConfineReads makes Read/Grep/Glob outside the working directory require
+	// approval (credential stores always do). Off by default.
+	ConfineReads   bool
+	PermissionMode permission.Mode
 
 	// Hooks is optional lifecycle instrumentation (Phase 3).
 	Hooks harness.HookRunner
@@ -553,6 +556,7 @@ func (s *Session) Prompt(ctx context.Context, input string) iter.Seq2[harness.Ev
 		PermissionMode:          s.opts.PermissionMode,
 		Allowed:                 s.opts.AllowedTools,
 		Disallowed:              s.opts.DisallowedTools,
+		ConfineReads:            s.opts.ConfineReads,
 		CanUseTool:              s.opts.CanUseTool,
 		Hooks:                   s.opts.Hooks,
 		Compactor:               s.compactor,

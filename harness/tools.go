@@ -50,10 +50,11 @@ func (l *loop) execOne(toolCtx context.Context, use llm.ContentBlock, emitProgre
 		mode = l.in.PermissionModeFunc()
 	}
 	pc := permission.Context{
-		Mode:       mode,
-		WorkingDir: l.in.WorkingDir,
-		Allowed:    l.in.Allowed,
-		Disallowed: l.in.Disallowed,
+		Mode:         mode,
+		WorkingDir:   l.in.WorkingDir,
+		Allowed:      l.in.Allowed,
+		Disallowed:   l.in.Disallowed,
+		ConfineReads: l.in.ConfineReads,
 	}
 	dec := permission.Evaluate(l.ctx, permission.Request{
 		ToolName:     use.Name,

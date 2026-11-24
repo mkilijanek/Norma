@@ -42,6 +42,7 @@ type Config struct {
 	CanUseTool     permission.CanUseTool
 	// Allowed / Disallowed are the coordinator's permission rules, applied to workers.
 	Allowed, Disallowed []string
+	ConfineReads        bool
 	Hooks               harness.HookRunner
 	// ToolOutputDir, MaxToolOutputChars and UntrustedOutputBoundary are passed
 	// to every worker unchanged (see subagent.Config), so worker tool output is
@@ -68,13 +69,14 @@ func (c *Config) mode() permission.Mode {
 // subagentConfig wires a subagent.Config with a single "worker" definition.
 func (c *Config) subagentConfig() subagent.Config {
 	return subagent.Config{
-		Provider:    c.Provider,
-		ParentTools: c.WorkerTools,
-		MaxDepth:    c.MaxDepth,
-		CanUseTool:  c.CanUseTool,
-		Allowed:     c.Allowed,
-		Disallowed:  c.Disallowed,
-		Hooks:       c.Hooks,
+		Provider:     c.Provider,
+		ParentTools:  c.WorkerTools,
+		MaxDepth:     c.MaxDepth,
+		CanUseTool:   c.CanUseTool,
+		Allowed:      c.Allowed,
+		Disallowed:   c.Disallowed,
+		ConfineReads: c.ConfineReads,
+		Hooks:        c.Hooks,
 
 		ToolOutputDir:           c.ToolOutputDir,
 		MaxToolOutputChars:      c.MaxToolOutputChars,

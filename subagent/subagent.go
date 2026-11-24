@@ -37,6 +37,8 @@ type Config struct {
 	// inside every subagent so a deny rule cannot be sidestepped by delegating.
 	Allowed    []string
 	Disallowed []string
+	// ConfineReads is the parent's read confinement, applied to every subagent.
+	ConfineReads bool
 	// ParentMode reports the parent's current permission mode. A subagent whose
 	// definition sets no mode inherits it, and a parent in plan mode confines
 	// every subagent to plan mode. Nil means the default mode.
@@ -149,6 +151,7 @@ func run(ctx context.Context, cfg Config, def Definition, agentType, prompt, wor
 		PermissionMode:          childMode(cfg, def),
 		Allowed:                 cfg.Allowed,
 		Disallowed:              cfg.Disallowed,
+		ConfineReads:            cfg.ConfineReads,
 		CanUseTool:              cfg.CanUseTool,
 		Hooks:                   cfg.Hooks,
 	}

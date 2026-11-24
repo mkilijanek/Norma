@@ -84,7 +84,9 @@ type QueryInput struct {
 	PermissionModeFunc func() permission.Mode
 	Allowed            []string
 	Disallowed         []string
-	CanUseTool         permission.CanUseTool
+	// ConfineReads asks for approval on Read/Grep/Glob outside WorkingDir.
+	ConfineReads bool
+	CanUseTool   permission.CanUseTool
 
 	// Hooks is optional lifecycle instrumentation. Nil disables it.
 	Hooks HookRunner
