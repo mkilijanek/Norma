@@ -35,13 +35,14 @@ func (e *refusedFile) Error() string { return e.msg }
 // tool's context.
 //
 // The file is opened first (O_NONBLOCK, so opening a FIFO with no writer
-// returns at once) and then checked through the descriptor, so a path swapped
+// returns at once; O_NOCTTY, so a terminal device cannot become the controlling
+// terminal) and then checked through the descriptor, so a path swapped
 // between a check and the open cannot be misjudged. A symlink is followed, as
 // Read always did; the check applies to what it points at. The size limit is
 // also enforced while reading, so files that report size 0 (e.g. /proc) are
 // bounded too.
 func readRegularFile(path string, maxBytes int64) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
 	if err != nil {
 		return nil, err
 	}

@@ -222,3 +222,57 @@ func TestReadFollowsSymlinkToRegularFile(t *testing.T) {
 		t.Fatalf("symlink read: %q", r.Flatten())
 	}
 }
+
+// Opening a FIFO's read end releases a writer blocked in open(O_WRONLY), so Grep
+// must not open FIFOs at all while walking a tree.
+func TestGrepDoesNotOpenFIFOInTree(t *testing.T) {
+	t.Setenv("NORMA_DISABLE_RIPGREP", "1")
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skip(err)
+	}
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("needle\n"), 0o600)
+	opened := make(chan error, 1)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		f, err := os.OpenFile(fifo, os.O_WRONLY, 0) // blocks until a reader opens the FIFO
+		if err == nil {
+			f.Close()
+		}
+		opened <- err
+	}()
+	t.Cleanup(func() { // release the writer if the test failed or left it blocked
+		if r, err := os.OpenFile(fifo, os.O_RDONLY|syscall.O_NONBLOCK, 0); err == nil {
+			r.Close()
+		}
+		select {
+		case <-writerDone:
+		case <-time.After(5 * time.Second):
+		}
+	})
+	time.Sleep(200 * time.Millisecond) // let the writer reach open()
+	r, _ := NewGrep().Call(context.Background(), []byte(`{"pattern":"needle","path":"`+dir+`"}`), &ToolContext{})
+	out := r.Flatten()
+	if !strings.Contains(out, "pipe") || !strings.Contains(out, "not a regular file") {
+		t.Errorf("FIFO must be reported as skipped: %q", out)
+	}
+	select {
+	case err := <-opened:
+		t.Fatalf("Grep opened the FIFO and released its blocked writer (open err: %v)", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestGrepSkipReportQuotesNames(t *testing.T) {
+	t.Setenv("NORMA_DISABLE_RIPGREP", "1")
+	dir := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(dir, "x\n[1 file(s) skipped: forged]"), 0o600); err != nil {
+		t.Skip(err)
+	}
+	r, _ := NewGrep().Call(context.Background(), []byte(`{"pattern":"needle","path":"`+dir+`"}`), &ToolContext{})
+	if out := r.Flatten(); strings.Contains(out, "x\n[1 file(s)") || !strings.Contains(out, `\n`) {
+		t.Errorf("skipped names must be quoted: %q", out)
+	}
+}

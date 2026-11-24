@@ -270,6 +270,17 @@ func runGrep(_ context.Context, input json.RawMessage, tc *ToolContext) (Result,
 			if len(typeGlobs) > 0 && !matchAnyGlob(typeGlobs, base) {
 				return nil
 			}
+			// FIFOs, sockets and devices are never opened: opening a FIFO's read
+			// end releases a writer blocked in open(), and a device may have side
+			// effects. A symlink is still opened and checked through the descriptor.
+			if t := d.Type(); t != 0 && t&fs.ModeSymlink == 0 {
+				rel, e := filepath.Rel(root, p)
+				if e != nil {
+					rel = p
+				}
+				skipped = append(skipped, skippedFile{rel, "not a regular file"})
+				return nil
+			}
 			scan(p, root)
 			return nil
 		})
@@ -327,7 +338,7 @@ func skippedNote(skipped []skippedFile) string {
 	}
 	parts := make([]string, len(listed))
 	for i, s := range listed {
-		parts[i] = fmt.Sprintf("%s (%s)", s.path, s.reason)
+		parts[i] = fmt.Sprintf("%q (%s)", s.path, s.reason)
 	}
 	more := ""
 	if n > len(listed) {
