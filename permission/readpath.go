@@ -96,7 +96,10 @@ func readNeedsApproval(toolName string, input json.RawMessage, workingDir string
 		p = filepath.Join(wd, p)
 	}
 	p = filepath.Clean(p)
-	real := resolveThroughExisting(p)
+	real, ok := resolveThroughExisting(p)
+	if !ok {
+		return true // a dangling link or an unreadable component: never auto-allowed
+	}
 	if sensitivePath(p) || sensitivePath(real) {
 		return true
 	}

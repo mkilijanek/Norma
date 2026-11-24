@@ -49,7 +49,7 @@ func Materialize(msgs []llm.Message, o Options) ([]llm.Message, error) {
 
 	// No ref tags: they address a scheme that is no longer running, and would
 	// only invite the model to use ids nothing will resolve.
-	return Reassemble(pruned, msgs, sc, ReassembleOptions{Tag: false}), nil
+	return Reassemble(pruned, msgs, sc, ReassembleOptions{Tag: false, State: &state}), nil
 }
 
 // RebuildFromHistory reconstructs compression state by replaying the Compress
@@ -73,7 +73,7 @@ func RebuildFromHistory(msgs []llm.Message, o Options) (*Session, error) {
 	res := noa.RebuildStateFromLog(noa.RebuildInput{
 		Messages:    cores,
 		Config:      sess.Config(),
-		Archiver:    NewReuseArchiver(sess.ArchiveRoot()),
+		Archiver:    newReuseArchiver(sess.ArchiveRoot(), o.ArchiveDirMode),
 		SessionID:   o.SessionID,
 		ArchiveRoot: sess.ArchiveRoot(),
 		CreatedAt:   now.Format(time.RFC3339),

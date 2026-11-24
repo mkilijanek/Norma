@@ -156,10 +156,17 @@ type Usage struct {
 	OutputTokens     int `json:"output_tokens"`
 	CacheReadTokens  int `json:"cache_read_tokens"`
 	CacheWriteTokens int `json:"cache_write_tokens"`
+	// ContextTokens is the latest physical response's input+output footprint.
+	// It is metadata, never an additive billing bucket. Retry adapters set it
+	// when the four billing counters include more than one physical attempt.
+	ContextTokens int `json:"context_tokens,omitempty"`
 }
 
 // Add accumulates token counts from another Usage.
 func (u *Usage) Add(o Usage) {
+	if o.ContextTokens > 0 {
+		u.ContextTokens = o.ContextTokens
+	}
 	u.InputTokens += o.InputTokens
 	u.OutputTokens += o.OutputTokens
 	u.CacheReadTokens += o.CacheReadTokens
@@ -173,6 +180,9 @@ func (u *Usage) Add(o Usage) {
 // message_start and real counts only in message_delta are thereby recovered
 // instead of lost.
 func (u *Usage) MergeEcho(o Usage) {
+	if o.ContextTokens > 0 {
+		u.ContextTokens = o.ContextTokens
+	}
 	u.OutputTokens += o.OutputTokens
 	if o.InputTokens > u.InputTokens {
 		u.InputTokens = o.InputTokens
@@ -201,11 +211,15 @@ type CompletionRequest struct {
 	// from per-request dynamic content; providers may set a cache breakpoint
 	// there (FR-02.2). 0 disables.
 	DynamicBoundary int
-	Messages        []Message
-	Tools           []ToolSchema
-	MaxTokens       int
-	Temperature     *float64
-	Stop            []string
+	// CacheBreakpoints optionally marks additional prefix endpoints before
+	// DynamicBoundary. Anthropic supports up to four total endpoints; other
+	// adapters ignore this transport hint. Empty retains legacy serialization.
+	CacheBreakpoints []int `json:"CacheBreakpoints,omitempty"`
+	Messages         []Message
+	Tools            []ToolSchema
+	MaxTokens        int
+	Temperature      *float64
+	Stop             []string
 	// Thinking overrides the provider's thinking mode for THIS request only:
 	// "" inherits Config.ThinkingType; "enabled"/"disabled" force that mode.
 	// Compaction's summary call sets "disabled" so the summarizer never spends

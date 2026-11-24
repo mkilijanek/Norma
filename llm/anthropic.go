@@ -7,6 +7,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"sort"
 )
 
 type anthropicProvider struct{ cfg Config }
@@ -90,6 +91,37 @@ func buildAnthropicSystem(req CompletionRequest) []anthropicSystemBlock {
 		return nil
 	}
 	b := req.DynamicBoundary
+	if b > 0 && len(req.CacheBreakpoints) > 0 {
+		end := min(b, len(req.System))
+		points := map[int]bool{end: true}
+		for _, point := range req.CacheBreakpoints {
+			if point > 0 && point < end {
+				points[point] = true
+			}
+		}
+		if len(points) > 1 {
+			ordered := make([]int, 0, len(points))
+			for point := range points {
+				ordered = append(ordered, point)
+			}
+			sort.Ints(ordered)
+			// Keep the legacy endpoint plus at most three earlier breakpoints.
+			if len(ordered) > 4 {
+				ordered = append(ordered[:3], end)
+			}
+			// Four cache endpoints plus an optional uncached dynamic tail.
+			blocks := make([]anthropicSystemBlock, 0, 5)
+			start := 0
+			for _, point := range ordered {
+				blocks = append(blocks, anthropicSystemBlock{Type: "text", Text: joinSystem(req.System[start:point]), CacheControl: map[string]any{"type": "ephemeral"}})
+				start = point
+			}
+			if end < len(req.System) {
+				blocks = append(blocks, anthropicSystemBlock{Type: "text", Text: joinSystem(req.System[end:])})
+			}
+			return blocks
+		}
+	}
 	if b <= 0 {
 		// No boundary set → no cache breakpoint.
 		return []anthropicSystemBlock{{Type: "text", Text: joinSystem(req.System)}}

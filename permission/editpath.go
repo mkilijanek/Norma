@@ -2,6 +2,8 @@ package permission
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +44,10 @@ func editPathAllowed(input json.RawMessage, workingDir string) bool {
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(wd, p)
 	}
-	real := resolveThroughExisting(filepath.Clean(p))
+	real, ok := resolveThroughExisting(filepath.Clean(p))
+	if !ok {
+		return false
+	}
 	rel, err := filepath.Rel(wdReal, real)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
@@ -57,16 +62,23 @@ func editPathAllowed(input json.RawMessage, workingDir string) bool {
 
 // resolveThroughExisting resolves symlinks in the longest existing prefix of p
 // and re-appends the not-yet-existing remainder, so a file about to be created
-// under a symlinked directory is judged by where it will really land.
-func resolveThroughExisting(p string) string {
+// under a symlinked directory is judged by where it will really land. ok is
+// false when a component exists but cannot be resolved (a dangling symlink, a
+// symlink loop, an unreadable directory): the later write could land anywhere,
+// so the caller must not treat the path as verified.
+func resolveThroughExisting(p string) (resolved string, ok bool) {
 	rest := ""
 	for cur := p; ; {
-		if real, err := filepath.EvalSymlinks(cur); err == nil {
-			return filepath.Join(real, rest)
+		real, err := filepath.EvalSymlinks(cur)
+		if err == nil {
+			return filepath.Join(real, rest), true
+		}
+		if _, lerr := os.Lstat(cur); lerr == nil || !errors.Is(lerr, fs.ErrNotExist) {
+			return "", false
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return p
+			return "", false
 		}
 		rest = filepath.Join(filepath.Base(cur), rest)
 		cur = parent

@@ -27,6 +27,9 @@ type ToolContext struct {
 	// something to it, or to recognise it later — read it here.
 	ToolUseID      string
 	MaxOutputChars int
+	// MaxReadFileBytes bounds the size of a file Read and Grep will load. Zero or
+	// negative keeps the default of 32 MiB.
+	MaxReadFileBytes int64
 	// OutputDir, when set, makes oversized tool output spill to a file there
 	// (full content preserved) instead of being discarded by truncation; the
 	// tool returns a head + a pointer to the file. Empty disables spilling.

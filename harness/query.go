@@ -16,10 +16,11 @@ import (
 
 // QueryInput is a fully-resolved request to run the loop.
 type QueryInput struct {
-	Provider        llm.Provider
-	System          []string
-	DynamicBoundary int
-	Messages        []llm.Message // conversation including the latest user turn
+	Provider         llm.Provider
+	System           []string
+	DynamicBoundary  int
+	CacheBreakpoints []int
+	Messages         []llm.Message // conversation including the latest user turn
 	// SystemReminder, when non-empty, is prepended as the first message on each
 	// model call. It is not stored in conversation history — the host builds it
 	// fresh per Prompt call so it never accumulates across turns.
@@ -245,12 +246,13 @@ type loop struct {
 	yield   func(Event, error) bool
 	sem     chan struct{} // bounds concurrent tool execution
 
-	messages        []llm.Message
-	usage           llm.Usage
-	lastInputTokens int // total token size the previous model response reported (compaction gate)
-	turnCount       int
-	boundaryCount   int       // boundary markers already seen, so Recorder fires once each
-	startTime       time.Time // loop start, for MaxDuration (wall-clock budget)
+	messages              []llm.Message
+	usage                 llm.Usage
+	lastInputTokens       int // total token size the previous model response reported (compaction gate)
+	lastCallContextTokens int // optional physical footprint, separate from retry billing
+	turnCount             int
+	boundaryCount         int       // boundary markers already seen, so Recorder fires once each
+	startTime             time.Time // loop start, for MaxDuration (wall-clock budget)
 
 	// settlement (wrap-up) phase state, entered when a budget is hit
 	settling     bool
@@ -452,6 +454,9 @@ func (l *loop) run() {
 		// The size the model just reported for its input, preferred by the
 		// compactor over local estimation on the next turn's gate check.
 		l.lastInputTokens = turnUsage.InputTokens + turnUsage.OutputTokens
+		if l.lastCallContextTokens > 0 {
+			l.lastInputTokens = l.lastCallContextTokens
+		}
 		l.record(asst, turnUsage)
 		// surface cumulative usage after each model turn so hosts can show live token
 		// counts during a run (not just at the terminal event).
@@ -797,12 +802,13 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 		msgs = append([]llm.Message{llm.UserText(l.in.SystemReminder)}, msgs...)
 	}
 	req := llm.CompletionRequest{
-		System:          l.in.System,
-		DynamicBoundary: l.in.DynamicBoundary,
-		Messages:        msgs,
-		Tools:           schemas,
-		MaxTokens:       l.maxTokens(),
-		Temperature:     l.in.Temperature,
+		System:           l.in.System,
+		DynamicBoundary:  l.in.DynamicBoundary,
+		CacheBreakpoints: append([]int(nil), l.in.CacheBreakpoints...),
+		Messages:         msgs,
+		Tools:            schemas,
+		MaxTokens:        l.maxTokens(),
+		Temperature:      l.in.Temperature,
 	}
 	if l.in.NonStreaming {
 		return l.completeAndExecute(req)
@@ -872,6 +878,7 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 		return asst, exec, "", nil, true, false
 	}
 	l.usage.Add(acc.Usage)
+	l.lastCallContextTokens = acc.Usage.ContextTokens
 	asst = acc.Message()
 	stopReason = acc.StopReason
 	if err != nil {
@@ -895,10 +902,13 @@ func (l *loop) streamAndExecute(schemas []llm.ToolSchema) (asst llm.Message, exe
 func (l *loop) completeAndExecute(req llm.CompletionRequest) (asst llm.Message, exec *streamExec, stopReason string, err error, consumerStopped, aborted bool) {
 	exec = newStreamExec(l)
 	msg, sr, usage, cerr := l.deps.CallModelSync(l.ctx, req)
+	// Failed atomic calls may still report billed usage. Retain it before
+	// surfacing the error, just like the streaming accumulator does.
+	l.usage.Add(usage)
+	l.lastCallContextTokens = usage.ContextTokens
 	if cerr != nil {
 		return asst, exec, "", cerr, false, false
 	}
-	l.usage.Add(usage)
 	asst = msg
 	stopReason = sr
 	for _, b := range msg.Content {

@@ -51,7 +51,7 @@ func runRead(_ context.Context, input json.RawMessage, tc *ToolContext) (Result,
 	if info.IsDir() {
 		return Errorf(fmt.Sprintf("Error: %s is a directory, not a file. Use LS or Glob to list its contents.", in.FilePath)), nil
 	}
-	data, err := readRegularFile(path)
+	data, err := readRegularFile(path, tc.readFileLimit())
 	if err != nil {
 		return Errorf(fmt.Sprintf("Error reading %s: %v", in.FilePath, err)), nil
 	}

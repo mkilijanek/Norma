@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -234,23 +235,73 @@ type Manager struct {
 // cannot pre-create or swap it (see secureDir).
 func baseTaskDir() string { return filepath.Join(os.TempDir(), taskBaseName()) }
 
+// ManagerOptions lets a host choose where task output lives. The zero value is
+// the default: a per-user directory under the temp dir, forced to 0700.
+type ManagerOptions struct {
+	// Dir is a host-supplied base directory for task output. When set, the
+	// SDK uses <Dir>/<session>/tasks instead of <tmp>/norma-<uid>/<session>/tasks.
+	// It must be an absolute path to an existing directory that is not a
+	// symlink and is owned by the current user; the SDK neither creates it nor
+	// changes its mode, so a host can leave it searchable (for example 0711) for
+	// a tool process running as another user. Otherwise NewManagerWithOptions
+	// returns an error. Output files stay 0600, created O_EXCL|O_NOFOLLOW.
+	Dir string
+	// DirMode is the mode of the <session> and <session>/tasks directories the
+	// SDK creates under Dir, applied exactly (the process umask does not narrow
+	// it). Zero means 0700. It must carry permission bits only and include
+	// owner read, write and search (0700). Setting it without Dir is an error.
+	DirMode os.FileMode
+}
+
 // NewManager creates the per-session task directory and garbage-collects stale
 // directories left by previous sessions.
 func NewManager(sessionID string) (*Manager, error) {
+	return NewManagerWithOptions(sessionID, ManagerOptions{})
+}
+
+// NewManagerWithOptions is NewManager with a host-chosen task directory; see
+// ManagerOptions. The zero ManagerOptions behaves exactly like NewManager.
+func NewManagerWithOptions(sessionID string, opts ManagerOptions) (*Manager, error) {
 	if sessionID == "" {
 		sessionID = "default"
 	}
 	if filepath.Base(sessionID) != sessionID || sessionID == "." || sessionID == ".." {
 		return nil, fmt.Errorf("invalid session id %q", sessionID)
 	}
-	if err := secureDir(baseTaskDir()); err != nil {
-		return nil, err
+	var base, dir string
+	if opts.Dir == "" {
+		if opts.DirMode != 0 {
+			return nil, errors.New("task dir mode set without a task dir")
+		}
+		base = baseTaskDir()
+		if err := secureDir(base); err != nil {
+			return nil, err
+		}
+		dir = filepath.Join(base, sessionID, "tasks")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	} else {
+		mode, err := validDirMode(opts.DirMode)
+		if err != nil {
+			return nil, fmt.Errorf("task dir %s: %w", opts.Dir, err)
+		}
+		if !filepath.IsAbs(opts.Dir) {
+			return nil, fmt.Errorf("task dir %q must be an absolute path", opts.Dir)
+		}
+		base = filepath.Clean(opts.Dir)
+		if err := checkHostDir(base); err != nil {
+			return nil, err
+		}
+		sessDir := filepath.Join(base, sessionID)
+		dir = filepath.Join(sessDir, "tasks")
+		for _, d := range []string{sessDir, dir} {
+			if err := ensureDirMode(d, mode); err != nil {
+				return nil, err
+			}
+		}
 	}
-	dir := filepath.Join(baseTaskDir(), sessionID, "tasks")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	cleanStaleSessions(baseTaskDir(), sessionID)
+	cleanStaleSessions(base, sessionID)
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		tasks:      map[string]*Task{},
@@ -264,6 +315,22 @@ func NewManager(sessionID string) (*Manager, error) {
 	pol := loadMemPolicy(src)
 	m.guard = newMemGuard(ctx, src, pol, m.memKill)
 	m.cgroups = newCgroupTier(pol)
+	return m, nil
+}
+
+// validDirMode checks a host-supplied directory mode: permission bits only, and
+// the owner must keep read, write and search so the SDK can use what it makes.
+// Zero selects the default, 0700.
+func validDirMode(m os.FileMode) (os.FileMode, error) {
+	if m == 0 {
+		return 0o700, nil
+	}
+	if m&^os.ModePerm != 0 {
+		return 0, fmt.Errorf("mode %v has bits beyond the permission bits", m)
+	}
+	if m&0o700 != 0o700 {
+		return 0, fmt.Errorf("mode %04o must give the owner read, write and search (0700)", m.Perm())
+	}
 	return m, nil
 }
 
@@ -289,6 +356,11 @@ func cleanStaleSessions(base, current string) {
 			continue
 		}
 		dir := filepath.Join(base, e.Name())
+		// A host-supplied base may hold unrelated directories: only remove what
+		// is shaped like a session directory this user created.
+		if !isOwnSessionDir(dir) {
+			continue
+		}
 		if newestMTime(dir).Before(cutoff) {
 			_ = os.RemoveAll(dir)
 		}

@@ -2,6 +2,7 @@ package noaadapter
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -29,6 +30,14 @@ type Options struct {
 	// copied without its sidecar would otherwise start from zero and re-compress
 	// everything the ancestor already did. At most maxInheritDepth are tried.
 	ParentSessionIDs []string
+	// ArchiveDirMode is the mode of the tier directories (<archive root>/tier<N>)
+	// created for archive files, applied exactly (the process umask does not
+	// narrow it). Zero means 0700. It must carry permission bits only and keep
+	// owner read, write and search. A host whose tool processes run as another
+	// user sets 0711 so they can reach an archive path the model is told to
+	// read; archive files themselves stay 0600 and the host publishes them one
+	// by one.
+	ArchiveDirMode os.FileMode
 	// OnWarn receives non-fatal diagnostics. noa writes nothing to stdout or
 	// stderr on its own.
 	OnWarn func(string)
@@ -103,6 +112,9 @@ func newSession(o Options) (*Session, error) {
 	if o.ArchiveBaseDir == "" {
 		return nil, ErrNoArchiveDir
 	}
+	if err := validArchiveDirMode(o.ArchiveDirMode); err != nil {
+		return nil, err
+	}
 	cfg := noa.DefaultConfig(o.ModelContextLimit)
 	if o.Config != nil {
 		cfg = *o.Config
@@ -119,7 +131,7 @@ func newSession(o Options) (*Session, error) {
 	s := &Session{
 		cfg:       cfg,
 		store:     NewStateStore(root),
-		archiver:  NewFileArchiver(root),
+		archiver:  newFileArchiver(root, o.ArchiveDirMode),
 		root:      root,
 		now:       now,
 		onWarn:    o.OnWarn,
