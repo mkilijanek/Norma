@@ -134,6 +134,17 @@ A host can place task output elsewhere with `agentcore.Options.TaskDir` and
 directories. Zero means `0700`. It must carry permission bits only and keep
 owner read, write and search (`0700`), or construction fails.
 
+## Read and Grep file size limit
+
+Read and Grep load a whole file into memory, so they refuse a file larger than
+32 MiB and anything that is not a regular file (FIFO, socket, device).
+`ToolContext.MaxReadFileBytes` raises or lowers that cap for a call; zero keeps
+the default. Read says why it refused a file. The pure-Go Grep names the files
+it did not search in a trailing `N file(s) skipped, not searched: ...` line
+(at most ten are listed), also when nothing matched. When a `ripgrep` binary is
+in use it does the searching and the cap does not apply. Symlinks are followed
+and the target is checked.
+
 ## web_search private addresses
 
 `WebSearchConfig.AllowPrivate` lets the DeepSeek-format backend reach private

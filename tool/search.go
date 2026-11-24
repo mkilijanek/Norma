@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -234,10 +235,15 @@ func runGrep(_ context.Context, input json.RawMessage, tc *ToolContext) (Result,
 
 	typeGlobs := rgTypeGlobs(in.Type)
 	var results []grepHit
+	var skipped []skippedFile
+	maxBytes := tc.readFileLimit()
 	scan := func(p, base string) {
-		fh := scanFile(p, base, re, mode, showLines, in.Multiline, before, after)
+		fh, sk := scanFile(p, base, re, mode, showLines, in.Multiline, before, after, maxBytes)
 		if fh != nil {
 			results = append(results, *fh)
+		}
+		if sk != nil {
+			skipped = append(skipped, *sk)
 		}
 	}
 	info, statErr := os.Stat(root)
@@ -270,8 +276,9 @@ func runGrep(_ context.Context, input json.RawMessage, tc *ToolContext) (Result,
 	} else {
 		scan(root, filepath.Dir(root))
 	}
+	note := skippedNote(skipped)
 	if len(results) == 0 {
-		return Text("No matches found"), nil
+		return Text("No matches found" + note), nil
 	}
 	sort.Slice(results, func(i, j int) bool { return results[i].path < results[j].path })
 
@@ -303,7 +310,30 @@ func runGrep(_ context.Context, input json.RawMessage, tc *ToolContext) (Result,
 	if more > 0 {
 		out += fmt.Sprintf("... [%d more result(s) — page with offset=%d, or head_limit=0 for all] ...\n", more, in.Offset+len(kept))
 	}
-	return Text(Capture(tc, out)), nil
+	return Text(Capture(tc, out+note)), nil
+}
+
+// skippedNote is the trailing line telling the model which files were not
+// searched. It lists at most maxSkippedListed of them, in path order.
+func skippedNote(skipped []skippedFile) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	sort.Slice(skipped, func(i, j int) bool { return skipped[i].path < skipped[j].path })
+	n := len(skipped)
+	listed := skipped
+	if n > maxSkippedListed {
+		listed = skipped[:maxSkippedListed]
+	}
+	parts := make([]string, len(listed))
+	for i, s := range listed {
+		parts[i] = fmt.Sprintf("%s (%s)", s.path, s.reason)
+	}
+	more := ""
+	if n > len(listed) {
+		more = fmt.Sprintf(", and %d more", n-len(listed))
+	}
+	return fmt.Sprintf("\n[%d file(s) skipped, not searched: %s%s]\n", n, strings.Join(parts, ", "), more)
 }
 
 // rgFileTypes maps a ripgrep-style file type to its globs (common subset).
@@ -379,14 +409,36 @@ type grepHit struct {
 	count int
 }
 
-func scanFile(path, base string, re *regexp.Regexp, mode string, showLines, multiline bool, before, after int) *grepHit {
-	data, err := readRegularFile(path) // skips FIFOs/devices and oversized files instead of hanging or exhausting memory
-	if err != nil || isBinary(data) {
-		return nil
-	}
+// skippedFile is a file Grep did not search because it is too large or not a
+// regular file. It is reported in the result so the absence of a hit is never
+// mistaken for a clean search.
+type skippedFile struct {
+	path   string
+	reason string
+}
+
+// maxSkippedListed bounds how many skipped files the result names.
+const maxSkippedListed = 10
+
+func scanFile(path, base string, re *regexp.Regexp, mode string, showLines, multiline bool, before, after int, maxBytes int64) (*grepHit, *skippedFile) {
 	rel := path
 	if r, e := filepath.Rel(base, path); e == nil {
 		rel = r
+	}
+	data, err := readRegularFile(path, maxBytes) // skips FIFOs/devices and oversized files instead of hanging or exhausting memory
+	if err != nil {
+		var refused *refusedFile
+		if errors.As(err, &refused) {
+			reason := refused.msg
+			if i := strings.Index(reason, ";"); i >= 0 {
+				reason = reason[:i] // drop the Read-specific hint
+			}
+			return nil, &skippedFile{rel, reason}
+		}
+		return nil, nil
+	}
+	if isBinary(data) {
+		return nil, nil
 	}
 	lines := strings.Split(string(data), "\n")
 	if n := len(lines); n > 0 && lines[n-1] == "" {
@@ -425,11 +477,11 @@ func scanFile(path, base string, re *regexp.Regexp, mode string, showLines, mult
 		}
 	}
 	if len(matches) == 0 {
-		return nil
+		return nil, nil
 	}
 	res := &grepHit{path: rel, count: len(matches)}
 	if mode != "content" {
-		return res
+		return res, nil
 	}
 
 	isMatch := make(map[int]bool, len(matches))
@@ -473,5 +525,5 @@ func scanFile(path, base string, re *regexp.Regexp, mode string, showLines, mult
 		}
 		prev = j
 	}
-	return res
+	return res, nil
 }

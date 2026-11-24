@@ -101,3 +101,17 @@ func TestReadGuardModes(t *testing.T) {
 		t.Error("Bash must not be affected")
 	}
 }
+
+func TestReadThroughDanglingSymlinkNeedsApproval(t *testing.T) {
+	wd := t.TempDir()
+	link := filepath.Join(wd, "cfg")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone", "secret"), link); err != nil {
+		t.Fatal(err)
+	}
+	if !readNeedsApproval("Read", json.RawMessage(`{"file_path":"`+link+`"}`), wd, false) {
+		t.Error("a read through a dangling symlink was auto-allowed")
+	}
+	if !readNeedsApproval("Read", json.RawMessage(`{"file_path":"`+filepath.Join(link, "x")+`"}`), wd, true) {
+		t.Error("a read under a dangling symlink was auto-allowed with ConfineReads")
+	}
+}
